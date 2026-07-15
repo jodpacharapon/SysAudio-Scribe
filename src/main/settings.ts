@@ -1,0 +1,150 @@
+import { readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { app, safeStorage } from 'electron'
+import {
+  AppSettings,
+  DEFAULT_SETTINGS,
+  PROVIDERS,
+  Provider,
+  TRANSCRIPTION_MODELS,
+  TranscriptionModel
+} from '../shared/types'
+
+/**
+ * API keys never live in the renderer and never live in plaintext on disk.
+ * safeStorage binds the ciphertext to the OS user account (DPAPI on Windows,
+ * Keychain on macOS), so a copied settings file is useless on another machine.
+ */
+const SETTINGS_FILE = () => join(app.getPath('userData'), 'settings.json')
+
+const KEY_PROVIDERS = ['openai', 'openrouter', 'gemini'] as const
+type KeyProvider = (typeof KEY_PROVIDERS)[number]
+
+/** Development-only fallbacks, checked when no key has been stored. */
+const ENV_KEY_NAMES: Record<KeyProvider, string> = {
+  openai: 'OPENAI_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+  gemini: 'GEMINI_API_KEY'
+}
+
+type EncryptedKeys = Record<KeyProvider, string | null>
+
+interface PersistedSettings extends AppSettings {
+  /** Keyed by provider so switching providers doesn't send the wrong credential. */
+  readonly encryptedApiKeys: EncryptedKeys
+}
+
+const emptyKeys = (): EncryptedKeys => ({ openai: null, openrouter: null, gemini: null })
+
+let cache: PersistedSettings | null = null
+
+function isModel(value: unknown): value is TranscriptionModel {
+  return TRANSCRIPTION_MODELS.includes(value as TranscriptionModel)
+}
+
+function isProvider(value: unknown): value is Provider {
+  return PROVIDERS.includes(value as Provider)
+}
+
+function coerceKeys(raw: unknown): EncryptedKeys {
+  const input = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
+  const keys = emptyKeys()
+  for (const provider of KEY_PROVIDERS) {
+    const value = input[provider]
+    keys[provider] = typeof value === 'string' ? value : null
+  }
+  return keys
+}
+
+/** Never trust file contents: coerce every field back into the expected shape. */
+function coerce(raw: unknown): PersistedSettings {
+  const input = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
+  return {
+    provider: isProvider(input.provider) ? input.provider : DEFAULT_SETTINGS.provider,
+    language: typeof input.language === 'string' ? input.language : DEFAULT_SETTINGS.language,
+    model: isModel(input.model) ? input.model : DEFAULT_SETTINGS.model,
+    prompt: typeof input.prompt === 'string' ? input.prompt : DEFAULT_SETTINGS.prompt,
+    keepAudioFiles: input.keepAudioFiles === true,
+    rewriteEnabled: input.rewriteEnabled === true,
+    rewriteModel: input.rewriteModel === 'gemini-1.5-pro' ? 'gemini-1.5-pro' : 'gemini-1.5-flash',
+    rewritePrompt: typeof input.rewritePrompt === 'string' ? input.rewritePrompt : DEFAULT_SETTINGS.rewritePrompt,
+    encryptedApiKeys: coerceKeys(input.encryptedApiKeys)
+  }
+}
+
+async function load(): Promise<PersistedSettings> {
+  if (cache) return cache
+  try {
+    cache = coerce(JSON.parse(await readFile(SETTINGS_FILE(), 'utf-8')))
+  } catch {
+    // Absent or corrupt file is an expected first-run state, not an error.
+    cache = { ...DEFAULT_SETTINGS, encryptedApiKeys: emptyKeys() }
+  }
+  return cache
+}
+
+async function persist(next: PersistedSettings): Promise<void> {
+  cache = next
+  await writeFile(SETTINGS_FILE(), JSON.stringify(next, null, 2), 'utf-8')
+}
+
+/** Settings safe to hand to the renderer — no key material. */
+export async function getPublicSettings(): Promise<AppSettings> {
+  const { provider, language, model, prompt, keepAudioFiles, rewriteEnabled, rewriteModel, rewritePrompt } = await load()
+  return { provider, language, model, prompt, keepAudioFiles, rewriteEnabled, rewriteModel, rewritePrompt }
+}
+
+/** Whether the given provider (default: the selected one) has a usable key. */
+export async function hasApiKey(provider?: KeyProvider): Promise<boolean> {
+  return (await getApiKey(provider)) !== null
+}
+
+/**
+ * @param apiKey `undefined` leaves the stored key untouched; `''` clears it.
+ *   The key is filed under `settings.provider`.
+ */
+export async function saveSettings(
+  settings: AppSettings,
+  apiKey?: string,
+  geminiKey?: string
+): Promise<void> {
+  const current = await load()
+  const next = coerce({ ...settings, encryptedApiKeys: current.encryptedApiKeys })
+
+  if (apiKey !== undefined) {
+    if (apiKey !== '' && !safeStorage.isEncryptionAvailable()) {
+      throw new Error('OS encryption is unavailable; refusing to store the API key in plaintext.')
+    }
+    next.encryptedApiKeys[next.provider] =
+      apiKey === '' ? null : safeStorage.encryptString(apiKey).toString('base64')
+  }
+
+  if (geminiKey !== undefined) {
+    if (geminiKey !== '' && !safeStorage.isEncryptionAvailable()) {
+      throw new Error('OS encryption is unavailable; refusing to store the API key in plaintext.')
+    }
+    next.encryptedApiKeys['gemini'] =
+      geminiKey === '' ? null : safeStorage.encryptString(geminiKey).toString('base64')
+  }
+
+  await persist(next)
+}
+
+/**
+ * Resolution order: encrypted store for the provider, then its env var for
+ * local development. Defaults to the selected provider.
+ */
+export async function getApiKey(provider?: KeyProvider): Promise<string | null> {
+  const settings = await load()
+  const target = provider ?? settings.provider
+  const encrypted = settings.encryptedApiKeys[target]
+
+  if (encrypted && safeStorage.isEncryptionAvailable()) {
+    try {
+      return safeStorage.decryptString(Buffer.from(encrypted, 'base64'))
+    } catch {
+      return null
+    }
+  }
+  return process.env[ENV_KEY_NAMES[target]] ?? null
+}

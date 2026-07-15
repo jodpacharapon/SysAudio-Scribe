@@ -1,0 +1,46 @@
+{
+  "name": "sysaudio-scribe",
+  "version": "0.1.0",
+  "description": "Notion-style note taking with system audio transcription",
+  "main": "./out/main/index.js",
+  "author": "SysAudio-Scribe",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "dist:win": "npm run build && electron-builder --win --publish never"
+  },
+  "dependencies": {
+    "@blocknote/core": "^0.23.5",
+    "@blocknote/mantine": "^0.23.5",
+    "@blocknote/react": "^0.23.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.4.3"
+  },
+  "build": {
+    "appId": "com.sysaudioscribe.app",
+    "productName": "SysAudio-Scribe",
+    "files": [
+      "out/**/*",
+      "resources/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  }
+}
