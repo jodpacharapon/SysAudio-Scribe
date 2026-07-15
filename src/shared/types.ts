@@ -44,6 +44,33 @@ export const TRANSCRIPTION_MODELS = [
 ] as const
 export type TranscriptionModel = (typeof TRANSCRIPTION_MODELS)[number]
 
+/**
+ * Which models each provider's transcription endpoint actually accepts.
+ *
+ * The three bare ids work on both. The `openai/`-prefixed Whisper Large models are
+ * OpenRouter-only routing ids — OpenAI's own API rejects the prefixed form — so
+ * offering them under the OpenAI provider would guarantee a 401.
+ */
+export const MODELS_BY_PROVIDER: Record<Provider, readonly TranscriptionModel[]> = {
+  openai: ['gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'whisper-1'],
+  openrouter: [
+    'gpt-4o-transcribe',
+    'gpt-4o-mini-transcribe',
+    'whisper-1',
+    'openai/whisper-large-v3',
+    'openai/whisper-large-v3-turbo'
+  ]
+}
+
+/** First entry is the safe default when a provider's current model becomes invalid. */
+export function defaultModelFor(provider: Provider): TranscriptionModel {
+  return MODELS_BY_PROVIDER[provider][0] ?? 'gpt-4o-transcribe'
+}
+
+export function isModelAvailable(provider: Provider, model: TranscriptionModel): boolean {
+  return MODELS_BY_PROVIDER[provider].includes(model)
+}
+
 export interface Page {
   readonly id: string
   title: string

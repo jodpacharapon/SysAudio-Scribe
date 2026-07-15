@@ -7,7 +7,9 @@ import {
   PROVIDERS,
   Provider,
   TRANSCRIPTION_MODELS,
-  TranscriptionModel
+  TranscriptionModel,
+  defaultModelFor,
+  isModelAvailable
 } from '../shared/types'
 
 /**
@@ -59,10 +61,15 @@ function coerceKeys(raw: unknown): EncryptedKeys {
 /** Never trust file contents: coerce every field back into the expected shape. */
 function coerce(raw: unknown): PersistedSettings {
   const input = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
+  const provider = isProvider(input.provider) ? input.provider : DEFAULT_SETTINGS.provider
+  const parsedModel = isModel(input.model) ? input.model : DEFAULT_SETTINGS.model
+  // Enforce the provider/model cross-field constraint here so a stale or
+  // hand-edited settings.json can never send an unusable model to the API.
+  const model = isModelAvailable(provider, parsedModel) ? parsedModel : defaultModelFor(provider)
   return {
-    provider: isProvider(input.provider) ? input.provider : DEFAULT_SETTINGS.provider,
+    provider,
     language: typeof input.language === 'string' ? input.language : DEFAULT_SETTINGS.language,
-    model: isModel(input.model) ? input.model : DEFAULT_SETTINGS.model,
+    model,
     prompt: typeof input.prompt === 'string' ? input.prompt : DEFAULT_SETTINGS.prompt,
     keepAudioFiles: input.keepAudioFiles === true,
     rewriteEnabled: input.rewriteEnabled === true,

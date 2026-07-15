@@ -1,11 +1,13 @@
 import { FormEvent, useEffect, useState } from 'react'
 import {
   AppSettings,
+  MODELS_BY_PROVIDER,
   PROVIDERS,
   PROVIDER_KEY_PREFIX,
   Provider,
-  TRANSCRIPTION_MODELS,
-  TranscriptionModel
+  TranscriptionModel,
+  defaultModelFor,
+  isModelAvailable
 } from '../../../shared/types'
 
 interface SettingsPanelProps {
@@ -161,7 +163,15 @@ export function SettingsPanel({
               <select
                 className="field__input"
                 value={draft.provider}
-                onChange={(event) => setDraft({ ...draft, provider: event.target.value as Provider })}
+                onChange={(event) => {
+                  const nextProvider = event.target.value as Provider
+                  // Switching providers can strand the selected model; snap it back
+                  // to a valid one so the user never saves an unusable combination.
+                  const nextModel = isModelAvailable(nextProvider, draft.model)
+                    ? draft.model
+                    : defaultModelFor(nextProvider)
+                  setDraft({ ...draft, provider: nextProvider, model: nextModel })
+                }}
               >
                 {PROVIDERS.map((provider) => (
                   <option key={provider} value={provider}>
@@ -200,7 +210,7 @@ export function SettingsPanel({
                 value={draft.model}
                 onChange={(event) => setDraft({ ...draft, model: event.target.value as TranscriptionModel })}
               >
-                {TRANSCRIPTION_MODELS.map((model) => (
+                {MODELS_BY_PROVIDER[draft.provider].map((model) => (
                   <option key={model} value={model}>
                     {model}
                   </option>
