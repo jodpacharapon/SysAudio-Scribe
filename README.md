@@ -180,5 +180,22 @@ This app is a recording tool. Before you use it, understand what leaves your mac
 ```bash
 npm run typecheck
 npm run build
-npm run dist:win     # NSIS installer
+npm run dist:win     # NSIS installer -> dist/
 ```
+
+## Updates
+
+The app uses a **notify-only** update check (no silent auto-install, no code signing required):
+
+- On launch it asks the GitHub Releases API for the latest published tag and compares it to the running version. If a newer one exists, a banner offers a **Download** button that opens the releases page in the browser.
+- There is also a manual **Check for Updates** button under *Settings → System Tools*.
+- All of this runs from the main process; the renderer never makes the network call.
+
+### Cutting a release
+
+1. Bump `version` in [package.json](package.json) (e.g. `0.1.0` → `0.2.0`).
+2. `npm run dist:win` to produce `dist/SysAudio-Scribe Setup <version>.exe`.
+3. On GitHub: **Releases → Draft a new release**, tag it `v<version>` (the `v` prefix is fine — the check strips it), and attach the `.exe`.
+4. **Publish**. Existing installs will surface the update banner on their next launch.
+
+No token or CI is required for this flow — the release is created through the GitHub web UI and the `.exe` is uploaded by hand.

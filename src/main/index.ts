@@ -4,7 +4,11 @@ import { BrowserWindow, Menu, app, dialog, ipcMain, session, shell } from 'elect
 import { registerDisplayMediaHandler } from './audio-capture'
 import { getApiKey, getPublicSettings, hasApiKey, saveSettings } from './settings'
 import { rewriteText, transcribeSegment } from './transcription'
+import { checkForUpdate } from './update-check'
 import { AppSettings, IPC, Provider, SegmentRequest, SegmentResult } from '../shared/types'
+
+/** Only URLs we trust are allowed through the external-open bridge. */
+const ALLOWED_EXTERNAL_HOSTS = new Set(['github.com', 'api.github.com'])
 
 const isDev = !app.isPackaged
 
@@ -99,6 +103,21 @@ function registerIpcHandlers(): void {
 
     await writeFile(filePath, content, 'utf-8')
     return true
+  })
+
+  ipcMain.handle(IPC.UPDATE_CHECK, () => checkForUpdate())
+
+  // The renderer has no network access of its own; it asks us to open trusted
+  // links (the GitHub releases page) in the user's real browser.
+  ipcMain.handle(IPC.OPEN_EXTERNAL, (_event, url: string) => {
+    try {
+      const { hostname } = new URL(url)
+      if (ALLOWED_EXTERNAL_HOSTS.has(hostname)) {
+        void shell.openExternal(url)
+      }
+    } catch {
+      // Ignore malformed URLs.
+    }
   })
 
   ipcMain.handle('app:toggle-devtools', () => {

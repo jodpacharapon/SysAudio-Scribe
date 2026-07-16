@@ -5,8 +5,19 @@ export const IPC = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_SAVE: 'settings:save',
   SETTINGS_HAS_KEY: 'settings:has-key',
-  SAVE_TEXT_FILE: 'file:save-text'
+  SAVE_TEXT_FILE: 'file:save-text',
+  UPDATE_CHECK: 'update:check',
+  OPEN_EXTERNAL: 'shell:open-external'
 } as const
+
+/** `owner/repo` — the single place the GitHub location is defined. */
+export const GITHUB_REPO = 'jodpacharapon/SysAudio-Scribe'
+
+/** Result of a notify-only update check. Never throws across IPC. */
+export type UpdateCheckResult =
+  | { readonly status: 'update-available'; readonly currentVersion: string; readonly latestVersion: string; readonly releaseUrl: string }
+  | { readonly status: 'up-to-date'; readonly currentVersion: string; readonly latestVersion: string }
+  | { readonly status: 'error'; readonly currentVersion: string; readonly message: string }
 
 export const PROVIDERS = ['openai', 'openrouter'] as const
 export type Provider = (typeof PROVIDERS)[number]

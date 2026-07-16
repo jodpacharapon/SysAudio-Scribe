@@ -6,6 +6,7 @@ import {
   PROVIDER_KEY_PREFIX,
   Provider,
   TranscriptionModel,
+  UpdateCheckResult,
   defaultModelFor,
   isModelAvailable
 } from '../../../shared/types'
@@ -14,6 +15,10 @@ interface SettingsPanelProps {
   readonly settings: AppSettings
   readonly theme: 'light' | 'dark'
   readonly onToggleTheme: () => void
+  readonly updateChecking: boolean
+  readonly updateResult: UpdateCheckResult | null
+  readonly onCheckUpdate: () => Promise<void>
+  readonly onOpenReleases: (url: string) => void
   readonly onClose: () => void
   readonly onSave: (settings: AppSettings, apiKey?: string, geminiKey?: string) => Promise<void>
   readonly onSaveAs?: () => void
@@ -36,6 +41,10 @@ export function SettingsPanel({
   settings,
   theme,
   onToggleTheme,
+  updateChecking,
+  updateResult,
+  onCheckUpdate,
+  onOpenReleases,
   onClose,
   onSave,
   onSaveAs
@@ -357,6 +366,43 @@ export function SettingsPanel({
                   <span>Dark</span>
                 </button>
               </div>
+            </div>
+
+            <div style={{ marginBottom: '24px' }}>
+              <span className="field__label" style={{ display: 'block', marginBottom: '8px', fontWeight: '600' }}>Updates</span>
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={() => void onCheckUpdate()}
+                disabled={updateChecking}
+                style={{ width: '100%', justifyContent: 'center', display: 'flex', alignItems: 'center', gap: '8px', padding: '10px' }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+                <span>{updateChecking ? 'Checking…' : 'Check for Updates'}</span>
+              </button>
+              {updateResult && !updateChecking && (
+                <span className="field__hint" style={{ marginTop: '8px', display: 'block' }}>
+                  {updateResult.status === 'update-available' ? (
+                    <>
+                      New version {updateResult.latestVersion} available.{' '}
+                      <a
+                        href={updateResult.releaseUrl}
+                        onClick={(e) => {
+                          e.preventDefault()
+                          onOpenReleases(updateResult.releaseUrl)
+                        }}
+                        style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 500 }}
+                      >
+                        Download ↗
+                      </a>
+                    </>
+                  ) : updateResult.status === 'up-to-date' ? (
+                    `You're on the latest version (${updateResult.currentVersion}).`
+                  ) : (
+                    `Couldn't check for updates: ${updateResult.message}`
+                  )}
+                </span>
+              )}
             </div>
 
             <div style={{ marginBottom: '24px' }}>

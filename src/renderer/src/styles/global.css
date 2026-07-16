@@ -16,6 +16,7 @@
   --placeholder: rgba(55, 53, 47, 0.15);
   --banner-error-bg: #fdebec;
   --banner-error-border: #f7d4d6;
+  --banner-update-bg: #eaf3fb;
   --panel-shadow: rgba(15, 15, 15, 0.24);
   --warn: #b7791f;
 
@@ -41,6 +42,7 @@
   --placeholder: rgba(255, 255, 255, 0.22);
   --banner-error-bg: #3a1f22;
   --banner-error-border: #5c2b2f;
+  --banner-update-bg: #1e2a38;
   --panel-shadow: rgba(0, 0, 0, 0.5);
   --warn: #e0b050;
 
@@ -430,6 +432,22 @@ body {
   background: var(--banner-error-bg);
   color: var(--danger);
   border-bottom: 1px solid var(--banner-error-border);
+}
+
+.banner--update {
+  background: var(--banner-update-bg);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+
+.banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.banner--update .button--record {
+  padding: 4px 12px;
 }
 
 .banner__dismiss {

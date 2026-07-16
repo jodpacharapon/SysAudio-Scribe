@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { AppSettings, IPC, Provider, SegmentRequest, SegmentResult } from '../shared/types'
+import { AppSettings, IPC, Provider, SegmentRequest, SegmentResult, UpdateCheckResult } from '../shared/types'
 
 /**
  * The renderer gets these four functions and nothing else — no `ipcRenderer`,
@@ -19,6 +19,10 @@ const api = {
 
   saveTextFile: (content: string, filename: string): Promise<boolean> =>
     ipcRenderer.invoke(IPC.SAVE_TEXT_FILE, content, filename),
+
+  checkForUpdate: (): Promise<UpdateCheckResult> => ipcRenderer.invoke(IPC.UPDATE_CHECK),
+
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.OPEN_EXTERNAL, url),
 
   onSaveAsTxt: (callback: () => void): () => void => {
     const subscription = () => callback()

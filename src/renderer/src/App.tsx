@@ -4,12 +4,14 @@ import { RecorderControls } from '@/components/RecorderControls'
 import { SettingsPanel } from '@/components/SettingsPanel'
 import { useSystemAudioRecorder } from '@/hooks/useSystemAudioRecorder'
 import { useTheme } from '@/hooks/useTheme'
+import { useUpdateCheck } from '@/hooks/useUpdateCheck'
 import { appendTranscript } from '@/lib/editor-append'
 import type { BlockNoteEditor } from '@blocknote/core'
 import { AppSettings, DEFAULT_SETTINGS, Page } from '../../shared/types'
 
 export function App(): JSX.Element {
   const { theme, toggleTheme } = useTheme()
+  const update = useUpdateCheck()
   const [pages, setPages] = useState<Page[]>([])
   const [activePageId, setActivePageId] = useState<string>('')
   const activeEditorRef = useRef<BlockNoteEditor | null>(null)
@@ -291,6 +293,26 @@ export function App(): JSX.Element {
           networkMessage={networkMessage}
         />
 
+        {update.available && (
+          <div className="banner banner--update" role="status">
+            <span>
+              🎉 มีเวอร์ชันใหม่ <strong>{update.available.latestVersion}</strong> พร้อมให้ดาวน์โหลด
+            </span>
+            <span className="banner__actions">
+              <button
+                type="button"
+                className="button button--record"
+                onClick={() => update.available && update.openReleases(update.available.releaseUrl)}
+              >
+                ดาวน์โหลด
+              </button>
+              <button type="button" className="banner__dismiss" onClick={update.dismiss} aria-label="Dismiss">
+                ×
+              </button>
+            </span>
+          </div>
+        )}
+
         {error && (
           <div className="banner banner--error" role="alert">
             <span>{error}</span>
@@ -320,6 +342,10 @@ export function App(): JSX.Element {
             settings={settings}
             theme={theme}
             onToggleTheme={toggleTheme}
+            updateChecking={update.checking}
+            updateResult={update.lastResult}
+            onCheckUpdate={update.check}
+            onOpenReleases={update.openReleases}
             onClose={() => setSettingsOpen(false)}
             onSave={handleSave}
             onSaveAs={handleSaveAs}
