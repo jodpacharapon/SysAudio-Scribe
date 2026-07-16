@@ -7,8 +7,22 @@ export const IPC = {
   SETTINGS_HAS_KEY: 'settings:has-key',
   SAVE_TEXT_FILE: 'file:save-text',
   UPDATE_CHECK: 'update:check',
-  OPEN_EXTERNAL: 'shell:open-external'
+  OPEN_EXTERNAL: 'shell:open-external',
+  // Floating pill choreography.
+  PILL_START: 'pill:start', // pill window -> main: begin recording + reveal editor
+  PILL_STOP: 'pill:stop', // pill window -> main: stop recording
+  REMOTE_CONTROL: 'remote:control', // main -> main window: 'start' | 'stop'
+  RECORDER_STATUS: 'recorder:status', // main window -> main: forward status to pill
+  PILL_STATUS: 'pill:status' // main -> pill window: current recorder status
 } as const
+
+/** Snapshot the pill needs to render its state, mirrored from the main window's recorder. */
+export interface RecorderStatusUpdate {
+  readonly status: 'idle' | 'recording' | 'finishing'
+  readonly pendingSegments: number
+}
+
+export type RemoteControlAction = 'start' | 'stop'
 
 /** `owner/repo` — the single place the GitHub location is defined. */
 export const GITHUB_REPO = 'jodpacharapon/SysAudio-Scribe'
@@ -102,6 +116,9 @@ export interface AppSettings {
   readonly rewriteEnabled: boolean
   readonly rewriteModel: 'gemini-1.5-flash' | 'gemini-1.5-pro'
   readonly rewritePrompt: string
+
+  /** Show the floating always-on-top quick-start pill on launch. */
+  readonly showPill: boolean
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -112,7 +129,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   keepAudioFiles: false,
   rewriteEnabled: false,
   rewriteModel: 'gemini-1.5-flash',
-  rewritePrompt: 'คุณคือผู้เชี่ยวชาญด้านการขัดเกลาและเรียบเรียงภาษาไทย นี่คือข้อความถอดเสียงดิบจากการพูดที่อาจมีคำสะกดผิด คำซ้ำ หรือคำที่หั่นครึ่งเนื่องจากการอัดเสียงตัดเป็นก้อน กรุณาขัดเกลาประโยคนี้ให้อ่านง่าย สละสลวย ถูกหลักไวยากรณ์ภาษาไทย โดยรักษาเนื้อหาเดิมอย่างครบถ้วน ห้ามสรุปย่อ ให้คืนค่าเฉพาะข้อความที่เรียบเรียงใหม่เท่านั้น ห้ามทักทาย ห้ามอธิบายใดๆ'
+  rewritePrompt: 'คุณคือผู้เชี่ยวชาญด้านการขัดเกลาและเรียบเรียงภาษาไทย นี่คือข้อความถอดเสียงดิบจากการพูดที่อาจมีคำสะกดผิด คำซ้ำ หรือคำที่หั่นครึ่งเนื่องจากการอัดเสียงตัดเป็นก้อน กรุณาขัดเกลาประโยคนี้ให้อ่านง่าย สละสลวย ถูกหลักไวยากรณ์ภาษาไทย โดยรักษาเนื้อหาเดิมอย่างครบถ้วน ห้ามสรุปย่อ ให้คืนค่าเฉพาะข้อความที่เรียบเรียงใหม่เท่านั้น ห้ามทักทาย ห้ามอธิบายใดๆ',
+  showPill: true
 }
 
 export interface SegmentRequest {

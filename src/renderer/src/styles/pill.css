@@ -1,0 +1,135 @@
+/* The pill window is transparent; only this rounded bar is visible. */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: 'Inter', -apple-system, 'Segoe UI', system-ui, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#pill-root {
+  height: 100%;
+}
+
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 100%;
+  padding: 0 10px 0 16px;
+  border-radius: 999px;
+  background: #202124;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  color: #ececec;
+  /* Whole bar is a drag handle; interactive children opt out below. */
+  -webkit-app-region: drag;
+}
+
+.pill__brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.pill__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #8a8a8a;
+}
+
+.pill__dot--recording {
+  background: #eb5757;
+  animation: pill-pulse 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.pill__dot--finishing {
+  background: #4a9eea;
+}
+
+@keyframes pill-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill__dot--recording {
+    animation: none;
+  }
+}
+
+.pill__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  line-height: 1.25;
+}
+
+.pill__title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pill__subtitle {
+  font-size: 11px;
+  color: #9aa0a6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pill__btn {
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 999px;
+  padding: 7px 16px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pill__btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.pill__btn--start {
+  background: #2383e2;
+  color: #fff;
+}
+
+.pill__btn--start:hover {
+  background: #1a6fc4;
+}
+
+.pill__btn--stop {
+  background: #eb5757;
+  color: #fff;
+}
+
+.pill__btn--stop:hover:not(:disabled) {
+  background: #cf4444;
+}
+
+.pill__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

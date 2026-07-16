@@ -179,6 +179,19 @@ export function App(): JSX.Element {
     onError: setError
   })
 
+  // The floating pill drives recording remotely through the main process.
+  useEffect(() => {
+    return window.scribe.onRemoteControl((action) => {
+      if (action === 'start') void start()
+      else void stop()
+    })
+  }, [start, stop])
+
+  // Mirror recorder state to the pill so its floating bar stays in sync.
+  useEffect(() => {
+    window.scribe.sendRecorderStatus({ status, pendingSegments })
+  }, [status, pendingSegments])
+
   const handleSave = useCallback(async (next: AppSettings, apiKey?: string, geminiKey?: string): Promise<void> => {
     await window.scribe.saveSettings(next, apiKey, geminiKey)
     setSettings(next)

@@ -32,7 +32,10 @@ export default defineConfig({
     },
     build: {
       rollupOptions: {
-        input: { index: resolve(__dirname, 'src/renderer/index.html') }
+        input: {
+          index: resolve(__dirname, 'src/renderer/index.html'),
+          pill: resolve(__dirname, 'src/renderer/pill.html')
+        }
       }
     },
     plugins: [react()]

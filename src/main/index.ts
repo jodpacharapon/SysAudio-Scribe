@@ -1,16 +1,48 @@
 import { join } from 'node:path'
 import { writeFile } from 'node:fs/promises'
-import { BrowserWindow, Menu, app, dialog, ipcMain, session, shell } from 'electron'
+import { BrowserWindow, Menu, app, dialog, globalShortcut, ipcMain, session, shell } from 'electron'
 import { registerDisplayMediaHandler } from './audio-capture'
 import { getApiKey, getPublicSettings, hasApiKey, saveSettings } from './settings'
 import { rewriteText, transcribeSegment } from './transcription'
 import { checkForUpdate } from './update-check'
-import { AppSettings, IPC, Provider, SegmentRequest, SegmentResult } from '../shared/types'
+import { destroyPill, sendPillStatus, showPill, hidePill, togglePill } from './pill-window'
+import {
+  AppSettings,
+  IPC,
+  Provider,
+  RecorderStatusUpdate,
+  RemoteControlAction,
+  SegmentRequest,
+  SegmentResult
+} from '../shared/types'
 
 /** Only URLs we trust are allowed through the external-open bridge. */
 const ALLOWED_EXTERNAL_HOSTS = new Set(['github.com', 'api.github.com'])
 
+/** Toggles the floating pill from anywhere in the OS. */
+const PILL_HOTKEY = 'CommandOrControl+Shift+R'
+
 const isDev = !app.isPackaged
+
+let mainWindow: BrowserWindow | null = null
+
+/** Bring the editor to the foreground (used when the pill starts a recording). */
+function revealMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+/** Relay a start/stop command to the recorder living in the main window's renderer. */
+function sendRemoteControl(action: RemoteControlAction): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(IPC.REMOTE_CONTROL, action)
+  }
+}
 
 function createWindow(): void {
   const window = new BrowserWindow({
@@ -30,6 +62,15 @@ function createWindow(): void {
       // sandboxed preload, so we get the extra OS-level renderer isolation for free.
       sandbox: true
     }
+  })
+
+  mainWindow = window
+
+  // Closing the editor should tear down the pill too, so the app can fully quit
+  // instead of lingering as a hidden window.
+  window.on('closed', () => {
+    mainWindow = null
+    destroyPill()
   })
 
   // Completely strip the native menu bar from the window frame on Windows/Linux
@@ -57,6 +98,9 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.SETTINGS_SAVE, async (_event, settings: AppSettings, apiKey?: string, geminiKey?: string) => {
     await saveSettings(settings, apiKey, geminiKey)
+    // Reflect the pill toggle immediately, without waiting for a relaunch.
+    if (settings.showPill) showPill()
+    else hidePill()
   })
 
   ipcMain.handle(IPC.TRANSCRIBE_SEGMENT, async (_event, request: SegmentRequest): Promise<SegmentResult> => {
@@ -120,6 +164,20 @@ function registerIpcHandlers(): void {
     }
   })
 
+  // Pill "Start transcribing": reveal the editor, then tell it to record.
+  ipcMain.handle(IPC.PILL_START, () => {
+    revealMainWindow()
+    sendRemoteControl('start')
+  })
+
+  ipcMain.handle(IPC.PILL_STOP, () => sendRemoteControl('stop'))
+
+  // The recorder lives in the main window; forward its state to the pill so the
+  // floating bar can mirror recording/elapsed without owning the capture.
+  ipcMain.on(IPC.RECORDER_STATUS, (_event, update: RecorderStatusUpdate) => {
+    sendPillStatus(IPC.PILL_STATUS, update)
+  })
+
   ipcMain.handle('app:toggle-devtools', () => {
     const win = BrowserWindow.getFocusedWindow()
     if (win) win.webContents.toggleDevTools()
@@ -152,18 +210,30 @@ function registerIpcHandlers(): void {
   })
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   registerDisplayMediaHandler(session.defaultSession)
   registerIpcHandlers()
-  
+
   // Hide native menu bar on Windows/Linux
   Menu.setApplicationMenu(null)
 
   createWindow()
 
+  // A global hotkey toggles the pill even when the app is in the background.
+  globalShortcut.register(PILL_HOTKEY, togglePill)
+
+  // Honour the persisted preference on launch.
+  const settings = await getPublicSettings()
+  if (settings.showPill) showPill()
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
+  destroyPill()
 })
 
 app.on('window-all-closed', () => {

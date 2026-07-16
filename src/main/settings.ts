@@ -75,6 +75,8 @@ function coerce(raw: unknown): PersistedSettings {
     rewriteEnabled: input.rewriteEnabled === true,
     rewriteModel: input.rewriteModel === 'gemini-1.5-pro' ? 'gemini-1.5-pro' : 'gemini-1.5-flash',
     rewritePrompt: typeof input.rewritePrompt === 'string' ? input.rewritePrompt : DEFAULT_SETTINGS.rewritePrompt,
+    // Absent in an older settings.json -> fall back to the default (shown).
+    showPill: typeof input.showPill === 'boolean' ? input.showPill : DEFAULT_SETTINGS.showPill,
     encryptedApiKeys: coerceKeys(input.encryptedApiKeys)
   }
 }
@@ -97,8 +99,18 @@ async function persist(next: PersistedSettings): Promise<void> {
 
 /** Settings safe to hand to the renderer — no key material. */
 export async function getPublicSettings(): Promise<AppSettings> {
-  const { provider, language, model, prompt, keepAudioFiles, rewriteEnabled, rewriteModel, rewritePrompt } = await load()
-  return { provider, language, model, prompt, keepAudioFiles, rewriteEnabled, rewriteModel, rewritePrompt }
+  const s = await load()
+  return {
+    provider: s.provider,
+    language: s.language,
+    model: s.model,
+    prompt: s.prompt,
+    keepAudioFiles: s.keepAudioFiles,
+    rewriteEnabled: s.rewriteEnabled,
+    rewriteModel: s.rewriteModel,
+    rewritePrompt: s.rewritePrompt,
+    showPill: s.showPill
+  }
 }
 
 /** Whether the given provider (default: the selected one) has a usable key. */

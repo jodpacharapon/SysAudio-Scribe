@@ -1,5 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { AppSettings, IPC, Provider, SegmentRequest, SegmentResult, UpdateCheckResult } from '../shared/types'
+import {
+  AppSettings,
+  IPC,
+  RecorderStatusUpdate,
+  RemoteControlAction,
+  SegmentRequest,
+  SegmentResult,
+  UpdateCheckResult
+} from '../shared/types'
 
 /**
  * The renderer gets these four functions and nothing else — no `ipcRenderer`,
@@ -36,7 +44,28 @@ const api = {
   reloadApp: (): Promise<void> => ipcRenderer.invoke('app:reload'),
   zoomIn: (): Promise<void> => ipcRenderer.invoke('app:zoom-in'),
   zoomOut: (): Promise<void> => ipcRenderer.invoke('app:zoom-out'),
-  zoomReset: (): Promise<void> => ipcRenderer.invoke('app:zoom-reset')
+  zoomReset: (): Promise<void> => ipcRenderer.invoke('app:zoom-reset'),
+
+  // --- Floating pill window ---
+  /** (pill window) Ask the main process to reveal the editor and start recording. */
+  pillStart: (): Promise<void> => ipcRenderer.invoke(IPC.PILL_START),
+  /** (pill window) Stop the active recording. */
+  pillStop: (): Promise<void> => ipcRenderer.invoke(IPC.PILL_STOP),
+  /** (pill window) Subscribe to recorder-state updates. Returns an unsubscribe fn. */
+  onPillStatus: (callback: (update: RecorderStatusUpdate) => void): (() => void) => {
+    const subscription = (_e: unknown, update: RecorderStatusUpdate) => callback(update)
+    ipcRenderer.on(IPC.PILL_STATUS, subscription)
+    return () => ipcRenderer.removeListener(IPC.PILL_STATUS, subscription)
+  },
+  /** (main window) React to start/stop commands relayed from the pill. */
+  onRemoteControl: (callback: (action: RemoteControlAction) => void): (() => void) => {
+    const subscription = (_e: unknown, action: RemoteControlAction) => callback(action)
+    ipcRenderer.on(IPC.REMOTE_CONTROL, subscription)
+    return () => ipcRenderer.removeListener(IPC.REMOTE_CONTROL, subscription)
+  },
+  /** (main window) Report recorder state so the pill can mirror it. */
+  sendRecorderStatus: (update: RecorderStatusUpdate): void =>
+    ipcRenderer.send(IPC.RECORDER_STATUS, update)
 } as const
 
 export type ScribeApi = typeof api

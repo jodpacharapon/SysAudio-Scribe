@@ -369,6 +369,19 @@ export function SettingsPanel({
             </div>
 
             <div style={{ marginBottom: '24px' }}>
+              <span className="field__label" style={{ display: 'block', marginBottom: '8px', fontWeight: '600' }}>Floating Bar</span>
+              <label className="field field--inline">
+                <input
+                  type="checkbox"
+                  checked={draft.showPill}
+                  onChange={(event) => setDraft({ ...draft, showPill: event.target.checked })}
+                />
+                <span className="field__label">แสดงแถบลอยควบคุมด่วนตอนเปิดแอป</span>
+              </label>
+              <span className="field__hint">แถบลอยอยู่บนสุดเสมอ กด Start ได้โดยไม่ต้องเปิดหน้าหลัก · สลับด้วย Ctrl+Shift+R</span>
+            </div>
+
+            <div style={{ marginBottom: '24px' }}>
               <span className="field__label" style={{ display: 'block', marginBottom: '8px', fontWeight: '600' }}>Updates</span>
               <button
                 type="button"
