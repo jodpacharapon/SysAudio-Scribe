@@ -27,6 +27,7 @@
     "electron": "^43.1.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "png-to-ico": "^3.0.2",
     "typescript": "^5.7.2",
     "vite": "^6.4.3"
   },
@@ -38,9 +39,14 @@
       "resources/**/*"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis"
       ]
+    },
+    "nsis": {
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     }
   }
 }

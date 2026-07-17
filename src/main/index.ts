@@ -51,6 +51,8 @@ function createWindow(): void {
     minWidth: 760,
     show: false,
     backgroundColor: '#ffffff',
+    // Bundled under resources/ (files glob), so this path resolves in dev and asar.
+    icon: join(__dirname, '../../resources/icon.png'),
     // 'hiddenInset' degrades to 'hidden' on Windows, which removes the close and
     // minimize buttons along with the title bar. Only macOS gets the inset look.
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
