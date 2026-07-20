@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, safeStorage } from 'electron'
@@ -31,9 +32,17 @@ const ENV_KEY_NAMES: Record<KeyProvider, string> = {
 
 type EncryptedKeys = Record<KeyProvider, string | null>
 
+/** Top-left of the pill in its **full** size; null until the user drags it. */
+export interface PillBounds {
+  readonly x: number
+  readonly y: number
+}
+
 interface PersistedSettings extends AppSettings {
   /** Keyed by provider so switching providers doesn't send the wrong credential. */
   readonly encryptedApiKeys: EncryptedKeys
+  /** Remembered pill position. Not part of AppSettings — the renderer never edits it. */
+  readonly pillBounds: PillBounds | null
 }
 
 const emptyKeys = (): EncryptedKeys => ({ openai: null, openrouter: null, gemini: null })
@@ -58,6 +67,14 @@ function coerceKeys(raw: unknown): EncryptedKeys {
   return keys
 }
 
+function coercePillBounds(raw: unknown): PillBounds | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const { x, y } = raw as Record<string, unknown>
+  return typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)
+    ? { x, y }
+    : null
+}
+
 /** Never trust file contents: coerce every field back into the expected shape. */
 function coerce(raw: unknown): PersistedSettings {
   const input = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
@@ -77,7 +94,8 @@ function coerce(raw: unknown): PersistedSettings {
     rewritePrompt: typeof input.rewritePrompt === 'string' ? input.rewritePrompt : DEFAULT_SETTINGS.rewritePrompt,
     // Absent in an older settings.json -> fall back to the default (shown).
     showPill: typeof input.showPill === 'boolean' ? input.showPill : DEFAULT_SETTINGS.showPill,
-    encryptedApiKeys: coerceKeys(input.encryptedApiKeys)
+    encryptedApiKeys: coerceKeys(input.encryptedApiKeys),
+    pillBounds: coercePillBounds(input.pillBounds)
   }
 }
 
@@ -87,7 +105,7 @@ async function load(): Promise<PersistedSettings> {
     cache = coerce(JSON.parse(await readFile(SETTINGS_FILE(), 'utf-8')))
   } catch {
     // Absent or corrupt file is an expected first-run state, not an error.
-    cache = { ...DEFAULT_SETTINGS, encryptedApiKeys: emptyKeys() }
+    cache = { ...DEFAULT_SETTINGS, encryptedApiKeys: emptyKeys(), pillBounds: null }
   }
   return cache
 }
@@ -113,6 +131,30 @@ export async function getPublicSettings(): Promise<AppSettings> {
   }
 }
 
+/** Remembered pill position, or null to use the default placement. */
+export async function getPillBounds(): Promise<PillBounds | null> {
+  return (await load()).pillBounds
+}
+
+export async function savePillBounds(bounds: PillBounds): Promise<void> {
+  const current = await load()
+  await persist({ ...current, pillBounds: bounds })
+}
+
+/**
+ * Synchronous variant for teardown paths (hide/quit), where an awaited write
+ * would not finish before the process exits.
+ */
+export function savePillBoundsSync(bounds: PillBounds): void {
+  if (!cache) return
+  cache = { ...cache, pillBounds: bounds }
+  try {
+    writeFileSync(SETTINGS_FILE(), JSON.stringify(cache, null, 2), 'utf-8')
+  } catch {
+    // Losing a window position is not worth surfacing to the user.
+  }
+}
+
 /** Whether the given provider (default: the selected one) has a usable key. */
 export async function hasApiKey(provider?: KeyProvider): Promise<boolean> {
   return (await getApiKey(provider)) !== null
@@ -128,7 +170,12 @@ export async function saveSettings(
   geminiKey?: string
 ): Promise<void> {
   const current = await load()
-  const next = coerce({ ...settings, encryptedApiKeys: current.encryptedApiKeys })
+  // Carry over fields the renderer never sees, so saving settings can't wipe them.
+  const next = coerce({
+    ...settings,
+    encryptedApiKeys: current.encryptedApiKeys,
+    pillBounds: current.pillBounds
+  })
 
   if (apiKey !== undefined) {
     if (apiKey !== '' && !safeStorage.isEncryptionAvailable()) {

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import {
   AppSettings,
   IPC,
+  PillMode,
   RecorderStatusUpdate,
   RemoteControlAction,
   SegmentRequest,
@@ -51,6 +52,8 @@ const api = {
   pillStart: (): Promise<void> => ipcRenderer.invoke(IPC.PILL_START),
   /** (pill window) Stop the active recording. */
   pillStop: (): Promise<void> => ipcRenderer.invoke(IPC.PILL_STOP),
+  /** (pill window) Shrink to the dot or expand back to the full bar. */
+  pillResize: (mode: PillMode): Promise<void> => ipcRenderer.invoke(IPC.PILL_RESIZE, mode),
   /** (pill window) Subscribe to recorder-state updates. Returns an unsubscribe fn. */
   onPillStatus: (callback: (update: RecorderStatusUpdate) => void): (() => void) => {
     const subscription = (_e: unknown, update: RecorderStatusUpdate) => callback(update)

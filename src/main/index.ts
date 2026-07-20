@@ -5,10 +5,11 @@ import { registerDisplayMediaHandler } from './audio-capture'
 import { getApiKey, getPublicSettings, hasApiKey, saveSettings } from './settings'
 import { rewriteText, transcribeSegment } from './transcription'
 import { checkForUpdate } from './update-check'
-import { destroyPill, sendPillStatus, showPill, hidePill, togglePill } from './pill-window'
+import { destroyPill, sendPillStatus, setPillMode, showPill, hidePill, togglePill } from './pill-window'
 import {
   AppSettings,
   IPC,
+  PillMode,
   Provider,
   RecorderStatusUpdate,
   RemoteControlAction,
@@ -101,7 +102,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.SETTINGS_SAVE, async (_event, settings: AppSettings, apiKey?: string, geminiKey?: string) => {
     await saveSettings(settings, apiKey, geminiKey)
     // Reflect the pill toggle immediately, without waiting for a relaunch.
-    if (settings.showPill) showPill()
+    if (settings.showPill) await showPill()
     else hidePill()
   })
 
@@ -174,6 +175,10 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.PILL_STOP, () => sendRemoteControl('stop'))
 
+  // The pill decides when to shrink (recording) or expand (user clicked the dot);
+  // the main process owns the actual window geometry.
+  ipcMain.handle(IPC.PILL_RESIZE, (_event, next: PillMode) => setPillMode(next))
+
   // The recorder lives in the main window; forward its state to the pill so the
   // floating bar can mirror recording/elapsed without owning the capture.
   ipcMain.on(IPC.RECORDER_STATUS, (_event, update: RecorderStatusUpdate) => {
@@ -222,11 +227,11 @@ void app.whenReady().then(async () => {
   createWindow()
 
   // A global hotkey toggles the pill even when the app is in the background.
-  globalShortcut.register(PILL_HOTKEY, togglePill)
+  globalShortcut.register(PILL_HOTKEY, () => void togglePill())
 
   // Honour the persisted preference on launch.
   const settings = await getPublicSettings()
-  if (settings.showPill) showPill()
+  if (settings.showPill) await showPill()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

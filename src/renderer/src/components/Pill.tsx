@@ -22,6 +22,8 @@ function useElapsed(active: boolean): string {
 export function Pill(): JSX.Element {
   const [status, setStatus] = useState<RecorderStatusUpdate['status']>('idle')
   const [pending, setPending] = useState(0)
+  /** User tapped the dot to get the full bar back while still recording. */
+  const [isExpanded, setExpanded] = useState(false)
 
   // Mirror the main window's recorder state, pushed via the main process.
   useEffect(() => {
@@ -34,6 +36,33 @@ export function Pill(): JSX.Element {
   const isRecording = status === 'recording'
   const isFinishing = status === 'finishing'
   const elapsed = useElapsed(isRecording)
+
+  // Collapse to the dot while recording so the bar stops covering the screen.
+  const isMini = isRecording && !isExpanded
+
+  // Leaving the recording state always restores the full bar.
+  useEffect(() => {
+    if (!isRecording) setExpanded(false)
+  }, [isRecording])
+
+  // The window geometry is owned by the main process; keep it in step with the UI.
+  useEffect(() => {
+    void window.scribe.pillResize(isMini ? 'mini' : 'full')
+  }, [isMini])
+
+  if (isMini) {
+    return (
+      <button
+        type="button"
+        className="pill-mini"
+        onClick={() => setExpanded(true)}
+        title={`กำลังบันทึก ${elapsed} — คลิกเพื่อขยาย`}
+        aria-label={`Recording ${elapsed}. Click to expand.`}
+      >
+        <span className="pill-mini__dot" />
+      </button>
+    )
+  }
 
   return (
     <div className="pill">
@@ -53,14 +82,27 @@ export function Pill(): JSX.Element {
       </div>
 
       {isRecording || isFinishing ? (
-        <button
-          type="button"
-          className="pill__btn pill__btn--stop"
-          onClick={() => void window.scribe.pillStop()}
-          disabled={isFinishing}
-        >
-          {isFinishing ? '…' : 'Stop'}
-        </button>
+        <>
+          {isRecording && (
+            <button
+              type="button"
+              className="pill__btn pill__btn--ghost"
+              onClick={() => setExpanded(false)}
+              title="ย่อเป็นจุดเล็ก"
+              aria-label="Collapse to dot"
+            >
+              –
+            </button>
+          )}
+          <button
+            type="button"
+            className="pill__btn pill__btn--stop"
+            onClick={() => void window.scribe.pillStop()}
+            disabled={isFinishing}
+          >
+            {isFinishing ? '…' : 'Stop'}
+          </button>
+        </>
       ) : (
         <button type="button" className="pill__btn pill__btn--start" onClick={() => void window.scribe.pillStart()}>
           Start transcribing

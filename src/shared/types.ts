@@ -13,8 +13,15 @@ export const IPC = {
   PILL_STOP: 'pill:stop', // pill window -> main: stop recording
   REMOTE_CONTROL: 'remote:control', // main -> main window: 'start' | 'stop'
   RECORDER_STATUS: 'recorder:status', // main window -> main: forward status to pill
-  PILL_STATUS: 'pill:status' // main -> pill window: current recorder status
+  PILL_STATUS: 'pill:status', // main -> pill window: current recorder status
+  PILL_RESIZE: 'pill:resize' // pill window -> main: switch between mini and full size
 } as const
+
+/**
+ * `mini` shrinks the pill to a small dot while recording so it stops covering
+ * the screen; `full` is the normal bar with the Start/Stop button.
+ */
+export type PillMode = 'mini' | 'full'
 
 /** Snapshot the pill needs to render its state, mirrored from the main window's recorder. */
 export interface RecorderStatusUpdate {
