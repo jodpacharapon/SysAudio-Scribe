@@ -183,6 +183,30 @@ npm run build
 npm run dist:win     # NSIS installer -> dist/
 ```
 
+## Running it day to day
+
+Double-click **`SysAudio-Scribe.bat`** in the project root. It builds once if needed, then launches the app.
+
+### Why a .bat and not the packaged .exe?
+
+Windows 11's **Smart App Control** blocks unsigned executables, and this app ships unsigned. A freshly built `SysAudio-Scribe.exe` is therefore blocked from running (and `electron-builder` may even fail to produce the NSIS installer, since Smart App Control blocks the helper binaries it spawns — this surfaces as `spawn UNKNOWN`).
+
+The official Electron binary *is* trusted, so the launcher runs the same production bundle (`out/`) through it. Identical app, no security downgrade.
+
+To check whether Smart App Control is on:
+
+```bash
+powershell -Command "(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy').VerifiedAndReputablePolicyState"
+```
+
+`1` = enforced, `2` = evaluation, `0` = off.
+
+Your options if you want a real double-clickable `.exe`:
+
+1. **Keep using the launcher** — no downside beyond the extra file.
+2. **Code-sign the app** (Azure Trusted Signing, ~$10/month). The proper fix, and it also removes the SmartScreen warning for anyone else who downloads it.
+3. **Turn Smart App Control off** — *Windows Security → App & browser control → Smart App Control → Off*. ⚠️ This is **irreversible**: it cannot be re-enabled without reinstalling Windows, and it lowers protection machine-wide.
+
 ## Updates
 
 The app uses a **notify-only** update check (no silent auto-install, no code signing required):
