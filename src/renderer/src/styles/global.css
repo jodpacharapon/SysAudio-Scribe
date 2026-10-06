@@ -417,6 +417,21 @@ body {
   background: rgba(35, 131, 226, 0.15);
 }
 
+/* Secondary to Record/Stop: available, but never the button competing for the eye. */
+.button--polish {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.button--polish:hover:not(:disabled) {
+  background: var(--hover-overlay-soft);
+  color: var(--text);
+}
+
 /* ---------- Banner ---------- */
 
 .banner {
@@ -530,6 +545,35 @@ body {
 .field__label {
   font-size: 13px;
   font-weight: 500;
+  /* Lets a label carry an action button on its right-hand end. */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Small inline action sitting in a field's label row, e.g. "Fetch models". */
+.field__action {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+
+.field__action:hover:not(:disabled) {
+  background: var(--hover-overlay-soft);
+  color: var(--accent);
+}
+
+.field__action:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .field__input {

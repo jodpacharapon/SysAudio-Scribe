@@ -5,7 +5,8 @@ import { SettingsPanel } from '@/components/SettingsPanel'
 import { useSystemAudioRecorder } from '@/hooks/useSystemAudioRecorder'
 import { useTheme } from '@/hooks/useTheme'
 import { useUpdateCheck } from '@/hooks/useUpdateCheck'
-import { appendTranscript } from '@/lib/editor-append'
+import { appendTranscript, readBlocks, replaceBlocks } from '@/lib/editor-append'
+import { stripOverlap } from '@/lib/overlap'
 import type { BlockNoteEditor } from '@blocknote/core'
 import { AppSettings, DEFAULT_SETTINGS, Page } from '../../shared/types'
 
@@ -15,6 +16,14 @@ export function App(): JSX.Element {
   const [pages, setPages] = useState<Page[]>([])
   const [activePageId, setActivePageId] = useState<string>('')
   const activeEditorRef = useRef<BlockNoteEditor | null>(null)
+
+  /** Last text appended, used to strip the words duplicated by overlapping audio. */
+  const lastTranscriptRef = useRef('')
+  /** Blocks this recording produced — the only ones the polish pass may rewrite. */
+  const transcriptBlockIdsRef = useRef<string[]>([])
+  const [isPolishing, setPolishing] = useState(false)
+  /** Mirrors `transcriptBlockIdsRef` for rendering — a ref alone would not re-render. */
+  const [hasTranscript, setHasTranscript] = useState(false)
 
   const handleEditorReady = useCallback((editor: BlockNoteEditor | null) => {
     activeEditorRef.current = editor
@@ -126,6 +135,10 @@ export function App(): JSX.Element {
   const [isSettingsOpen, setSettingsOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Read inside callbacks that must not be rebuilt whenever settings change.
+  const settingsRef = useRef<AppSettings>(DEFAULT_SETTINGS)
+  settingsRef.current = settings
+
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [networkMessage, setNetworkMessage] = useState<string | null>(null)
 
@@ -169,9 +182,20 @@ export function App(): JSX.Element {
   }, [])
 
   const handleTranscript = useCallback((text: string) => {
-    if (activeEditorRef.current) {
-      appendTranscript(activeEditorRef.current, text)
+    const editor = activeEditorRef.current
+    if (!editor) return
+
+    // Consecutive segments share a sliver of audio by design, so the opening of
+    // this one usually repeats the close of the last.
+    const deduplicated = stripOverlap(lastTranscriptRef.current, text)
+    if (!deduplicated.trim()) return
+
+    const blockId = appendTranscript(editor, deduplicated)
+    if (blockId) {
+      transcriptBlockIdsRef.current = [...transcriptBlockIdsRef.current, blockId]
+      setHasTranscript(true)
     }
+    lastTranscriptRef.current = deduplicated
   }, [])
 
   const { status, pendingSegments, isMicMuted, toggleMic, start, stop } = useSystemAudioRecorder({
@@ -179,13 +203,55 @@ export function App(): JSX.Element {
     onError: setError
   })
 
+  const handlePolish = useCallback(async (): Promise<void> => {
+    const editor = activeEditorRef.current
+    if (!editor || isPolishing) return
+
+    const blockIds = transcriptBlockIdsRef.current
+    const raw = readBlocks(editor, blockIds)
+    if (!raw.trim()) {
+      setError('There is no transcript to polish yet.')
+      return
+    }
+
+    setPolishing(true)
+    try {
+      const result = await window.scribe.rewriteTranscript(raw)
+      if (!result.ok) {
+        setError(result.error)
+        return
+      }
+      // Re-point at the replacements so polishing twice stays idempotent rather
+      // than leaving the second pass with ids that no longer exist.
+      transcriptBlockIdsRef.current = replaceBlocks(editor, blockIds, result.text)
+      setError(null)
+    } finally {
+      setPolishing(false)
+    }
+  }, [isPolishing])
+
+  /** A new recording starts a new transcript: drop the previous session's state. */
+  const handleStart = useCallback(async (): Promise<void> => {
+    lastTranscriptRef.current = ''
+    transcriptBlockIdsRef.current = []
+    setHasTranscript(false)
+    await start()
+  }, [start])
+
+  const handleStop = useCallback(async (): Promise<void> => {
+    await stop()
+    // Polishing is deferred to here on purpose: only now does the model get to
+    // see whole sentences instead of 20-second fragments.
+    if (settingsRef.current.rewriteEnabled) await handlePolish()
+  }, [handlePolish, stop])
+
   // The floating pill drives recording remotely through the main process.
   useEffect(() => {
     return window.scribe.onRemoteControl((action) => {
-      if (action === 'start') void start()
-      else void stop()
+      if (action === 'start') void handleStart()
+      else void handleStop()
     })
-  }, [start, stop])
+  }, [handleStart, handleStop])
 
   // Mirror recorder state to the pill so its floating bar stays in sync.
   useEffect(() => {
@@ -300,8 +366,11 @@ export function App(): JSX.Element {
           canRecord={hasStoredKey}
           isMicMuted={isMicMuted}
           onToggleMic={toggleMic}
-          onStart={() => void start()}
-          onStop={() => void stop()}
+          onStart={() => void handleStart()}
+          onStop={() => void handleStop()}
+          canPolish={hasTranscript}
+          isPolishing={isPolishing}
+          onPolish={() => void handlePolish()}
           isOnline={isOnline}
           networkMessage={networkMessage}
         />

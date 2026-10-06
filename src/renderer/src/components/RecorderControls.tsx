@@ -10,6 +10,10 @@ interface RecorderControlsProps {
   readonly onStop: () => void
   readonly isOnline: boolean
   readonly networkMessage: string | null
+  /** There is transcript text worth polishing. */
+  readonly canPolish: boolean
+  readonly isPolishing: boolean
+  readonly onPolish: () => void
 }
 
 const LABELS: Record<RecorderStatus, string> = {
@@ -27,7 +31,10 @@ export function RecorderControls({
   onStart,
   onStop,
   isOnline,
-  networkMessage
+  networkMessage,
+  canPolish,
+  isPolishing,
+  onPolish
 }: RecorderControlsProps): JSX.Element {
   const isRecording = status === 'recording'
   const isFinishing = status === 'finishing'
@@ -75,6 +82,20 @@ export function RecorderControls({
               <span>Mic On</span>
             </>
           )}
+        </button>
+
+        <button
+          type="button"
+          className="button button--polish"
+          onClick={onPolish}
+          disabled={!canPolish || isPolishing || isRecording || isFinishing}
+          title={
+            canPolish
+              ? 'Rewrite the whole transcript with Gemini'
+              : 'Record something first'
+          }
+        >
+          {isPolishing ? 'Polishing…' : 'Polish'}
         </button>
 
         {isRecording || isFinishing ? (
