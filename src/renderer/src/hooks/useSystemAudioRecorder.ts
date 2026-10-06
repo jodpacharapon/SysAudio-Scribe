@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { MIN_SEGMENT_BYTES, SEGMENT_DURATION_MS, pickSupportedMimeType } from '@/lib/constants'
+import {
+  MIN_SEGMENT_BYTES,
+  SEGMENT_DURATION_MS,
+  SEGMENT_OVERLAP_MS,
+  pickSupportedMimeType
+} from '@/lib/constants'
 import { TranscriptionQueue } from '@/lib/transcription-queue'
 import type { SegmentResult } from '../../../shared/types'
 
@@ -30,8 +35,10 @@ export function useSystemAudioRecorder({ onTranscript, onError }: RecorderOption
   const micStreamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const micGainRef = useRef<GainNode | null>(null)
-  const recorderRef = useRef<MediaRecorder | null>(null)
-  const timerRef = useRef<number | null>(null)
+  // Overlapping segments mean two recorders can be live at once.
+  const recordersRef = useRef<Set<MediaRecorder>>(new Set())
+  const cycleTimerRef = useRef<number | null>(null)
+  const timersRef = useRef<Set<number>>(new Set())
   const queueRef = useRef<TranscriptionQueue | null>(null)
   const sequenceRef = useRef(0)
   const isActiveRef = useRef(false)
@@ -63,29 +70,35 @@ export function useSystemAudioRecorder({ onTranscript, onError }: RecorderOption
   }, [])
 
   /**
-   * Records exactly one segment, then re-arms itself. Restarting the recorder
-   * (rather than calling `start(timeslice)`) is what guarantees each blob carries
-   * its own WebM header and can be decoded standalone by the API.
+   * Records one segment and schedules its own shutdown.
+   *
+   * Each segment gets its own MediaRecorder (rather than one recorder emitting
+   * timeslices) because only a recorder's first blob carries the WebM header,
+   * and the API cannot decode a headerless fragment. The cost of that choice is
+   * a teardown gap, which `SEGMENT_OVERLAP_MS` covers by leaving this recorder
+   * running after its successor has already started.
    */
-  const runSegment = useCallback((stream: MediaStream, mimeType: string): void => {
+  const spawnSegment = useCallback((stream: MediaStream, mimeType: string): void => {
+    if (!isActiveRef.current) return
+
     const chunks: Blob[] = []
     const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 128_000 })
-    recorderRef.current = recorder
+    const sequence = sequenceRef.current
+    sequenceRef.current += 1
+    recordersRef.current.add(recorder)
 
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) chunks.push(event.data)
     }
 
     recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: mimeType })
-      if (blob.size >= MIN_SEGMENT_BYTES) {
-        queueRef.current?.enqueue(sequenceRef.current, blob)
-        sequenceRef.current += 1
-      }
+      recordersRef.current.delete(recorder)
 
-      if (isActiveRef.current) {
-        runSegment(stream, mimeType)
-      } else {
+      const blob = new Blob(chunks, { type: mimeType })
+      if (blob.size >= MIN_SEGMENT_BYTES) queueRef.current?.enqueue(sequence, blob)
+
+      // The last recorder to wind down releases whoever is awaiting stop().
+      if (!isActiveRef.current && recordersRef.current.size === 0) {
         stopSignalRef.current?.()
         stopSignalRef.current = null
       }
@@ -94,9 +107,33 @@ export function useSystemAudioRecorder({ onTranscript, onError }: RecorderOption
     recorder.onerror = () => onErrorRef.current('The audio recorder failed mid-segment.')
 
     recorder.start()
-    timerRef.current = window.setTimeout(() => {
+
+    const timer = window.setTimeout(() => {
+      timersRef.current.delete(timer)
       if (recorder.state === 'recording') recorder.stop()
-    }, SEGMENT_DURATION_MS)
+    }, SEGMENT_DURATION_MS + SEGMENT_OVERLAP_MS)
+    timersRef.current.add(timer)
+  }, [])
+
+  /** Starts a segment every `SEGMENT_DURATION_MS`, each outliving the next by the overlap. */
+  const startSegmentCycle = useCallback(
+    (stream: MediaStream, mimeType: string): void => {
+      spawnSegment(stream, mimeType)
+      cycleTimerRef.current = window.setInterval(
+        () => spawnSegment(stream, mimeType),
+        SEGMENT_DURATION_MS
+      )
+    },
+    [spawnSegment]
+  )
+
+  const clearTimers = useCallback((): void => {
+    if (cycleTimerRef.current !== null) {
+      window.clearInterval(cycleTimerRef.current)
+      cycleTimerRef.current = null
+    }
+    timersRef.current.forEach((timer) => window.clearTimeout(timer))
+    timersRef.current.clear()
   }, [])
 
   const releaseStream = useCallback(() => {
@@ -111,8 +148,7 @@ export function useSystemAudioRecorder({ onTranscript, onError }: RecorderOption
       audioContextRef.current = null
     }
     micGainRef.current = null
-
-    recorderRef.current = null
+    recordersRef.current.clear()
   }, [])
 
   const stop = useCallback(async (): Promise<void> => {
@@ -120,17 +156,22 @@ export function useSystemAudioRecorder({ onTranscript, onError }: RecorderOption
     isActiveRef.current = false
     setStatus('finishing')
 
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
+    clearTimers()
 
-    const recorder = recorderRef.current
-    if (recorder && recorder.state !== 'inactive') {
-      // The tail segment (shorter than SEGMENT_DURATION_MS) is flushed by `onstop`.
+    // Both the current segment and its freshly started overlap partner need to
+    // flush; `onstop` resolves this once the last of them has handed over its blob.
+    //
+    // This waits on every recorder still in the set, not just the ones still
+    // running: a recorder whose own timer stopped it microseconds ago is already
+    // 'inactive' but has not delivered its blob yet, and walking away here would
+    // drop that audio once `releaseStream` clears the queue out from under it.
+    const pending = [...recordersRef.current]
+    if (pending.length > 0) {
       await new Promise<void>((resolve) => {
         stopSignalRef.current = resolve
-        recorder.stop()
+        pending.forEach((recorder) => {
+          if (recorder.state !== 'inactive') recorder.stop()
+        })
       })
     }
 
@@ -138,7 +179,7 @@ export function useSystemAudioRecorder({ onTranscript, onError }: RecorderOption
     await queueRef.current?.drain()
     queueRef.current = null
     setStatus('idle')
-  }, [releaseStream])
+  }, [clearTimers, releaseStream])
 
   const start = useCallback(async (): Promise<void> => {
     if (isActiveRef.current) return
@@ -208,22 +249,31 @@ export function useSystemAudioRecorder({ onTranscript, onError }: RecorderOption
       }
 
       streamRef.current = stream
+      // Sequence 0 is what tells the main process this is a fresh transcript and
+      // the carried-over decoding context must be dropped.
       sequenceRef.current = 0
+      recordersRef.current.clear()
       queueRef.current = new TranscriptionQueue(handleResult, setPendingSegments)
       isActiveRef.current = true
       setStatus('recording')
 
-      runSegment(finalStream, mimeType)
+      startSegmentCycle(finalStream, mimeType)
     } catch (error) {
       isActiveRef.current = false
       releaseStream()
       setStatus('idle')
       onErrorRef.current(error instanceof Error ? error.message : 'Could not start system audio capture.')
     }
-  }, [handleResult, isMicMuted, releaseStream, runSegment, stop])
+  }, [handleResult, isMicMuted, releaseStream, startSegmentCycle, stop])
 
   // Closing the window mid-recording must not leave the capture device held open.
-  useEffect(() => () => releaseStream(), [releaseStream])
+  useEffect(
+    () => () => {
+      clearTimers()
+      releaseStream()
+    },
+    [clearTimers, releaseStream]
+  )
 
   return { status, pendingSegments, isMicMuted, toggleMic, start, stop }
 }
