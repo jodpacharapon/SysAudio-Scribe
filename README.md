@@ -23,14 +23,60 @@ Both providers expose the same OpenAI-shaped multipart transcription API, so onl
 |---|---|---|
 | Endpoint | `api.openai.com/v1/audio/transcriptions` | `openrouter.ai/api/v1/audio/transcriptions` |
 | Key prefix | `sk-` | `sk-or-` |
-| Models | `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1` | same three (bare or `openai/`-prefixed) |
+| Models | `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1` | those three, plus `openai/whisper-large-v3` and `openai/whisper-large-v3-turbo` |
 
 Keys are stored **per provider**, so switching the picker never sends the wrong credential.
+
+### Model lists are fetched, not hardcoded
+
+Settings has a **Fetch models** button next to each model picker. It asks the
+provider what it serves right now, using the key in the box — you do not have to
+save it first.
+
+This exists because a baked-in list rots fast. `gemini-1.5-*` and `gemini-2.5-*`
+were each the recommended default and each retired within about a year, and an
+app that only knows the ids it shipped with will keep sending a model the
+provider has already dropped.
+
+| Target | Source | Filter |
+|---|---|---|
+| OpenAI | `GET /v1/models` | ids matching `transcribe` or `whisper` |
+| OpenRouter | `GET /api/v1/models` | same, merged with the hand-verified list |
+| Gemini | `GET /v1beta/models` | models declaring `generateContent` |
+
+Only Gemini states capability outright. The other two return one flat list for
+every endpoint, so the id is the only signal available — the filter errs towards
+showing too much, because an unusable id produces a clear API error while an
+over-tight filter would silently hide a model that works.
+
+Any non-empty model id is accepted and stored. The one rule still enforced is
+that OpenAI rejects `openai/`-prefixed routing ids, which fails every time.
+
+### When a model is retired
+
+Two things stop a pinned default from rotting silently:
+
+- **The fallback learns.** The last list each provider returned is kept in
+  `settings.json` and offered ahead of the built-in list, which is frozen the day
+  the app is built. The picker says which of the three it is showing — live,
+  cached, or built-in — so a stale list is never mistaken for a current one.
+- **A dead model says so.** A 404, an OpenRouter `does not exist`, or an OpenAI
+  `model_not_found` is turned into *"Model X is no longer available. Open
+  Settings, press Fetch models, and pick a current one."* rather than a raw
+  status code.
+
+The polish pass is the place this used to hide: every chunk failing would leave
+each chunk's raw text in place, so a dead model produced a "polished" transcript
+identical to the original with nothing to explain it. Partial failures still
+keep what succeeded, but a pass where *every* chunk failed now raises.
 
 Two things worth knowing about OpenRouter's transcription endpoint, both verified against the live API:
 
 - It serves **only the OpenAI model family**. `openai/gpt-audio`, `google/gemini-*` and `mistralai/voxtral-*` appear in the `/models` catalogue but are rejected here with `Model ... does not exist`.
 - `whisper-1` bills per second; the `gpt-4o-*` models bill per token.
+- The `openai/`-prefixed Whisper Large V3 ids are **OpenRouter-only routing ids**. OpenAI's own API rejects the prefixed form, so they are not offered under the OpenAI provider.
+
+Note that `whisper-1` is Whisper **large-v2**, not v3. To actually run Whisper Large V3, pick OpenRouter and one of the `openai/whisper-large-v3*` ids.
 
 ## Platform support
 
@@ -93,7 +139,7 @@ Two things worth knowing about OpenRouter's transcription endpoint, both verifie
         file     = segment.webm
         model    = gpt-4o-transcribe
         language = th          ← pinning this stops the model guessing
-        prompt   = <your jargon and proper nouns>
+        prompt   = <your jargon> + <tail of the previous segment>
 
     POST → the endpoint for the selected provider (OpenAI or OpenRouter).
     Retries 429/5xx with exponential backoff. 401 fails immediately.
@@ -105,22 +151,52 @@ Two things worth knowing about OpenRouter's transcription endpoint, both verifie
          │  Failures are returned as VALUES, not thrown — one bad segment
          │  must never stop an in-progress recording.
          ▼
-[7] Renderer appends the text as a new BlockNote paragraph block.
-    src/renderer/src/lib/editor-append.ts
+[7] Renderer strips the words duplicated by the segment overlap, then
+    appends the text as a new BlockNote paragraph block.
+    src/renderer/src/lib/overlap.ts, src/renderer/src/lib/editor-append.ts
 
     A fresh document already holds one empty paragraph, so the first
     segment REPLACES it rather than inserting after it.
+         │
+         ▼
+[8] On stop, optionally polish the whole transcript with Gemini.
+    src/main/transcription.ts → rewriteTranscript()
+
+    Runs once on the finished text, never per segment: a 20-second
+    fragment is the one unit where the model cannot tell how the
+    sentence started, so polishing it produces confident nonsense.
 ```
+
+### Segment overlap
+
+Each segment keeps recording for `SEGMENT_OVERLAP_MS` after its successor has
+started, so no audio falls into the gap between tearing down one MediaRecorder
+and constructing the next. That makes the same words appear at the end of one
+segment and the start of the next; `stripOverlap` removes the repeat by matching
+the longest common run, ignoring whitespace and case.
+
+It is deliberately biased towards leaving text in. An unstripped duplicate is a
+visible stutter you can delete; an over-eager strip silently deletes speech.
+
+### Decoding context
+
+Whisper's `prompt` field means "text that immediately precedes this audio", so
+each request carries the last ~220 characters of the transcript so far. Without
+it the model re-segments every chunk from a cold start, which is most visible in
+Thai: the first few syllables after a boundary get mis-split.
+
+The vocabulary goes first in the prompt because the API truncates from the
+front — a long tail would otherwise push the user's own terms out.
 
 ### Timing
 
-The first text appears roughly `30s + upload + inference`. Lower `SEGMENT_DURATION_MS` in `src/renderer/src/lib/constants.ts` for faster feedback, at the cost of accuracy: shorter segments cut sentences mid-clause, and Thai word segmentation degrades when the model loses cross-sentence context.
+The first text appears roughly `20s + overlap + upload + inference`. Lower `SEGMENT_DURATION_MS` in `src/renderer/src/lib/constants.ts` for faster feedback, at the cost of accuracy: shorter segments cut sentences mid-clause, and Thai word segmentation degrades when the model loses cross-sentence context.
 
 ## Accuracy notes
 
 Three settings move the needle, in order of impact:
 
-1. **Model.** `gpt-4o-transcribe` > `gpt-4o-mini-transcribe` > `whisper-1`. The gap on Thai is large.
+1. **Model.** `gpt-4o-transcribe` and `openai/whisper-large-v3` lead; `gpt-4o-mini-transcribe` trails them; `whisper-1` is last by a wide margin on Thai.
 2. **Language pin.** Setting `th` prevents the model from misdetecting the language on short or noisy segments.
 3. **Vocabulary prompt.** Feed it names, product terms, and jargon. This is the cheapest accuracy win available.
 
@@ -133,7 +209,7 @@ Sending a 1-second 440 Hz sine tone — pure non-speech — returns:
 | `whisper-1` | `"โปรดติดตามตอนต่อไป"` |
 | `gpt-4o-transcribe` | `"Beep"` |
 
-`whisper-1` hallucinates fluent Thai from a beep. That is exactly the failure mode you hit during pauses in a meeting, and it is why the 6 KB silence gate in `constants.ts` exists — but a gate only catches true silence, not background noise. The `gpt-4o-*` models are far more resistant.
+`whisper-1` hallucinates fluent Thai from a beep. That is exactly the failure mode you hit during pauses in a meeting, and it is why the `MIN_SEGMENT_BYTES` silence gate in `constants.ts` exists — but a gate only catches true silence, not background noise. The `gpt-4o-*` models are far more resistant.
 
 ## Project layout
 
@@ -143,14 +219,18 @@ src/
 ├── main/
 │   ├── index.ts             window, IPC handlers
 │   ├── audio-capture.ts     display-media handler → loopback audio
-│   ├── transcription.ts     OpenAI upload, retry, backoff
+│   ├── transcription.ts     upload, retry, backoff, Gemini polish
+│   ├── transcript-context.ts  decoding context carried between segments
+│   ├── update-check.ts      notify-only GitHub release check
 │   └── settings.ts          safeStorage-encrypted key + settings
 ├── preload/index.ts         the only renderer-reachable surface
 └── renderer/src/
     ├── App.tsx
     ├── components/          Editor, RecorderControls, SettingsPanel
     ├── hooks/useSystemAudioRecorder.ts
-    └── lib/                 constants, queue, editor-append
+    └── lib/                 constants, queue, overlap, editor-append
+
+tests/                       unit tests (vitest)
 ```
 
 ## Privacy
@@ -182,6 +262,27 @@ npm run typecheck
 npm run build
 npm run dist:win     # NSIS installer -> dist/
 ```
+
+### Icons
+
+Every app icon is a downscale of one master image:
+
+| File | Role |
+|---|---|
+| `build/logo-master.png` | 841x841 RGBA master. The only file to edit |
+| `build/icon.png`, `resources/icon.png` | 256px window and installer icons |
+| `build/icon.ico` | all seven sizes Windows picks between, 16 to 256 |
+
+```bash
+npm run icons        # regenerates everything from the master
+```
+
+The master is a raster, not a vector. That is a known limitation: the logo was
+produced by an image model, and the "SVG" exports it offers are auto-traces of
+the same bitmap, which carry the anti-aliased edges as dozens of colour-banded
+paths and look worse than the PNG at every size. 841px is comfortably above the
+largest icon the app needs (256px), so nothing is lost today — but a redrawn
+vector master would be a welcome contribution.
 
 ## Running it day to day
 
