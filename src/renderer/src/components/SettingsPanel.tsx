@@ -1,14 +1,17 @@
 import { FormEvent, useEffect, useState } from 'react'
+import { useModelList } from '@/hooks/useModelList'
 import {
   AppSettings,
-  MODELS_BY_PROVIDER,
+  KNOWN_MODELS_BY_PROVIDER,
+  KNOWN_REWRITE_MODELS,
+  ModelListResult,
   PROVIDERS,
   PROVIDER_KEY_PREFIX,
   Provider,
   TranscriptionModel,
   UpdateCheckResult,
   defaultModelFor,
-  isModelAvailable
+  isModelUsableOn
 } from '../../../shared/types'
 
 interface SettingsPanelProps {
@@ -24,12 +27,23 @@ interface SettingsPanelProps {
   readonly onSaveAs?: () => void
 }
 
-const MODEL_HINTS: Record<TranscriptionModel, string> = {
+/**
+ * Notes for the models we have actually measured. The list is no longer closed,
+ * so anything unrecognised simply gets no note rather than breaking the picker.
+ */
+const MODEL_HINTS: Record<string, string> = {
   'gpt-4o-transcribe': 'Highest accuracy, best Thai word segmentation.',
   'gpt-4o-mini-transcribe': 'Faster and cheaper, slightly lower accuracy.',
   'whisper-1': 'Legacy. Cheapest, and prone to hallucinating text during silence.',
   'openai/whisper-large-v3': 'Whisper Large V3 (OpenRouter). High accuracy multilingual transcription.',
-  'openai/whisper-large-v3-turbo': 'Whisper Large V3 Turbo (OpenRouter). Ultra-fast, highly accurate multilingual transcription.'
+  'openai/whisper-large-v3-turbo': 'Whisper Large V3 Turbo (OpenRouter). Ultra-fast, highly accurate multilingual.'
+}
+
+/** Where the offered models came from, so a stale list is never mistaken for a live one. */
+const LIST_SOURCE_HINT: Record<ModelListResult['source'], string> = {
+  live: 'Fetched live from the provider just now.',
+  cache: 'Last list this machine saw. Press Fetch models to refresh it.',
+  none: 'Built-in list, frozen when this version was built. Press Fetch models for the current set.'
 }
 
 const PROVIDER_LABELS: Record<Provider, string> = {
@@ -57,6 +71,10 @@ export function SettingsPanel({
   const [error, setError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [activeTab, setActiveTab] = useState<'stt' | 'rewrite' | 'system'>('stt')
+
+  // Live catalogues. Each starts from the built-in list and upgrades once fetched.
+  const sttModels = useModelList(draft.provider, KNOWN_MODELS_BY_PROVIDER[draft.provider])
+  const geminiModels = useModelList('gemini', KNOWN_REWRITE_MODELS)
 
   // Keys are stored per provider, so the "already stored" hint must follow the picker.
   useEffect(() => {
@@ -174,9 +192,9 @@ export function SettingsPanel({
                 value={draft.provider}
                 onChange={(event) => {
                   const nextProvider = event.target.value as Provider
-                  // Switching providers can strand the selected model; snap it back
-                  // to a valid one so the user never saves an unusable combination.
-                  const nextModel = isModelAvailable(nextProvider, draft.model)
+                  // Switching to OpenAI can strand an `openai/`-prefixed routing
+                  // id, which that API rejects outright; snap those back.
+                  const nextModel = isModelUsableOn(nextProvider, draft.model)
                     ? draft.model
                     : defaultModelFor(nextProvider)
                   setDraft({ ...draft, provider: nextProvider, model: nextModel })
@@ -212,21 +230,43 @@ export function SettingsPanel({
               )}
             </label>
 
-            <label className="field">
-              <span className="field__label">Model</span>
+            <div className="field">
+              <span className="field__label">
+                Model
+                <button
+                  type="button"
+                  className="field__action"
+                  onClick={() => void sttModels.fetch(apiKey)}
+                  disabled={sttModels.loading}
+                >
+                  {sttModels.loading ? 'Loading…' : 'Fetch models'}
+                </button>
+              </span>
               <select
                 className="field__input"
                 value={draft.model}
-                onChange={(event) => setDraft({ ...draft, model: event.target.value as TranscriptionModel })}
+                onChange={(event) => setDraft({ ...draft, model: event.target.value })}
               >
-                {MODELS_BY_PROVIDER[draft.provider].map((model) => (
+                {/* A model saved earlier may be absent from the current list. */}
+                {!sttModels.models.includes(draft.model) && (
+                  <option value={draft.model}>{draft.model} (saved)</option>
+                )}
+                {sttModels.models.map((model) => (
                   <option key={model} value={model}>
                     {model}
                   </option>
                 ))}
               </select>
-              <span className="field__hint">{MODEL_HINTS[draft.model]}</span>
-            </label>
+              {sttModels.error ? (
+                <span className="field__hint field__hint--warn">
+                  {sttModels.error} Showing the built-in list.
+                </span>
+              ) : (
+                <span className="field__hint">
+                  {MODEL_HINTS[draft.model] ?? LIST_SOURCE_HINT[sttModels.source]}
+                </span>
+              )}
+            </div>
 
             <label className="field">
               <span className="field__label">Language</span>
@@ -269,25 +309,47 @@ export function SettingsPanel({
                 checked={draft.rewriteEnabled}
                 onChange={(event) => setDraft({ ...draft, rewriteEnabled: event.target.checked })}
               />
-              <span className="field__label" style={{ fontWeight: '600' }}>Enable Auto-Rewrite / Polish</span>
+              <span className="field__label" style={{ fontWeight: '600' }}>
+                Polish automatically when recording stops
+              </span>
             </label>
 
-            <label className="field">
-              <span className="field__label">Gemini Model</span>
+            <div className="field">
+              <span className="field__label">
+                Gemini Model
+                <button
+                  type="button"
+                  className="field__action"
+                  onClick={() => void geminiModels.fetch(geminiKey)}
+                  disabled={geminiModels.loading}
+                >
+                  {geminiModels.loading ? 'Loading…' : 'Fetch models'}
+                </button>
+              </span>
               <select
                 className="field__input"
                 value={draft.rewriteModel}
-                onChange={(event) => setDraft({ ...draft, rewriteModel: event.target.value as any })}
+                onChange={(event) => setDraft({ ...draft, rewriteModel: event.target.value })}
               >
-                <option value="gemini-1.5-flash">Gemini 1.5 Flash (Recommended - Fast & Free)</option>
-                <option value="gemini-1.5-pro">Gemini 1.5 Pro (Ultra-accurate)</option>
+                {!geminiModels.models.includes(draft.rewriteModel) && (
+                  <option value={draft.rewriteModel}>{draft.rewriteModel} (saved)</option>
+                )}
+                {geminiModels.models.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
               </select>
-              <span className="field__hint">
-                {draft.rewriteModel === 'gemini-1.5-pro'
-                  ? 'Free (2 RPM). Best for complex transcripts.'
-                  : 'Free (15 RPM). Recommended for real-time note taking.'}
-              </span>
-            </label>
+              {geminiModels.error ? (
+                <span className="field__hint field__hint--warn">
+                  {geminiModels.error} Showing the built-in list.
+                </span>
+              ) : (
+                <span className="field__hint">
+                  {LIST_SOURCE_HINT[geminiModels.source]}
+                </span>
+              )}
+            </div>
 
             <label className="field">
               <span className="field__label">
