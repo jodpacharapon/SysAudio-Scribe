@@ -5,12 +5,14 @@ import { app, safeStorage } from 'electron'
 import {
   AppSettings,
   DEFAULT_SETTINGS,
+  MODEL_TARGETS,
+  ModelTarget,
   PROVIDERS,
   Provider,
-  TRANSCRIPTION_MODELS,
   TranscriptionModel,
+  coerceRewriteModel,
   defaultModelFor,
-  isModelAvailable
+  isModelUsableOn
 } from '../shared/types'
 
 /**
@@ -38,20 +40,28 @@ export interface PillBounds {
   readonly y: number
 }
 
-interface PersistedSettings extends AppSettings {
+/**
+ * Last model list each provider returned.
+ *
+ * The built-in list is frozen at build time and rots from the day it ships, so
+ * the picker prefers the newest list actually seen on this machine. One
+ * successful lookup keeps the fallback useful offline, and for every release
+ * after that one.
+ */
+export type ModelCache = Partial<Record<ModelTarget, string[]>>
+
+export interface PersistedSettings extends AppSettings {
   /** Keyed by provider so switching providers doesn't send the wrong credential. */
   readonly encryptedApiKeys: EncryptedKeys
   /** Remembered pill position. Not part of AppSettings — the renderer never edits it. */
   readonly pillBounds: PillBounds | null
+  /** Not part of AppSettings: the renderer reads it through its own IPC call. */
+  readonly modelCache: ModelCache
 }
 
 const emptyKeys = (): EncryptedKeys => ({ openai: null, openrouter: null, gemini: null })
 
 let cache: PersistedSettings | null = null
-
-function isModel(value: unknown): value is TranscriptionModel {
-  return TRANSCRIPTION_MODELS.includes(value as TranscriptionModel)
-}
 
 function isProvider(value: unknown): value is Provider {
   return PROVIDERS.includes(value as Provider)
@@ -67,6 +77,18 @@ function coerceKeys(raw: unknown): EncryptedKeys {
   return keys
 }
 
+function coerceModelCache(raw: unknown): ModelCache {
+  const input = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
+  const cache: ModelCache = {}
+  for (const target of MODEL_TARGETS) {
+    const value = input[target]
+    if (!Array.isArray(value)) continue
+    const models = value.filter((model): model is string => typeof model === 'string' && model.length > 0)
+    if (models.length > 0) cache[target] = models
+  }
+  return cache
+}
+
 function coercePillBounds(raw: unknown): PillBounds | null {
   if (typeof raw !== 'object' || raw === null) return null
   const { x, y } = raw as Record<string, unknown>
@@ -76,13 +98,17 @@ function coercePillBounds(raw: unknown): PillBounds | null {
 }
 
 /** Never trust file contents: coerce every field back into the expected shape. */
-function coerce(raw: unknown): PersistedSettings {
+export function coerce(raw: unknown): PersistedSettings {
   const input = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
   const provider = isProvider(input.provider) ? input.provider : DEFAULT_SETTINGS.provider
-  const parsedModel = isModel(input.model) ? input.model : DEFAULT_SETTINGS.model
-  // Enforce the provider/model cross-field constraint here so a stale or
-  // hand-edited settings.json can never send an unusable model to the API.
-  const model = isModelAvailable(provider, parsedModel) ? parsedModel : defaultModelFor(provider)
+  // Any non-empty id is accepted: the picker now lists whatever the provider
+  // currently serves, which is routinely newer than this build's known list.
+  const storedModel = typeof input.model === 'string' ? input.model.trim() : ''
+  // The one rule still worth enforcing is the cross-provider prefix: OpenAI
+  // rejects the `openai/`-prefixed routing ids every time, without exception.
+  const model: TranscriptionModel = isModelUsableOn(provider, storedModel)
+    ? storedModel
+    : defaultModelFor(provider)
   return {
     provider,
     language: typeof input.language === 'string' ? input.language : DEFAULT_SETTINGS.language,
@@ -90,12 +116,14 @@ function coerce(raw: unknown): PersistedSettings {
     prompt: typeof input.prompt === 'string' ? input.prompt : DEFAULT_SETTINGS.prompt,
     keepAudioFiles: input.keepAudioFiles === true,
     rewriteEnabled: input.rewriteEnabled === true,
-    rewriteModel: input.rewriteModel === 'gemini-1.5-pro' ? 'gemini-1.5-pro' : 'gemini-1.5-flash',
+    // Migrates a settings.json written before the 2.5 models existed.
+    rewriteModel: coerceRewriteModel(input.rewriteModel),
     rewritePrompt: typeof input.rewritePrompt === 'string' ? input.rewritePrompt : DEFAULT_SETTINGS.rewritePrompt,
     // Absent in an older settings.json -> fall back to the default (shown).
     showPill: typeof input.showPill === 'boolean' ? input.showPill : DEFAULT_SETTINGS.showPill,
     encryptedApiKeys: coerceKeys(input.encryptedApiKeys),
-    pillBounds: coercePillBounds(input.pillBounds)
+    pillBounds: coercePillBounds(input.pillBounds),
+    modelCache: coerceModelCache(input.modelCache)
   }
 }
 
@@ -105,7 +133,7 @@ async function load(): Promise<PersistedSettings> {
     cache = coerce(JSON.parse(await readFile(SETTINGS_FILE(), 'utf-8')))
   } catch {
     // Absent or corrupt file is an expected first-run state, not an error.
-    cache = { ...DEFAULT_SETTINGS, encryptedApiKeys: emptyKeys(), pillBounds: null }
+    cache = { ...DEFAULT_SETTINGS, encryptedApiKeys: emptyKeys(), pillBounds: null, modelCache: {} }
   }
   return cache
 }
@@ -174,7 +202,8 @@ export async function saveSettings(
   const next = coerce({
     ...settings,
     encryptedApiKeys: current.encryptedApiKeys,
-    pillBounds: current.pillBounds
+    pillBounds: current.pillBounds,
+    modelCache: current.modelCache
   })
 
   if (apiKey !== undefined) {
@@ -213,4 +242,15 @@ export async function getApiKey(provider?: KeyProvider): Promise<string | null> 
     }
   }
   return process.env[ENV_KEY_NAMES[target]] ?? null
+}
+
+/** Last list seen for this target, or an empty array if none has been fetched. */
+export async function getCachedModels(target: ModelTarget): Promise<string[]> {
+  return (await load()).modelCache[target] ?? []
+}
+
+export async function saveCachedModels(target: ModelTarget, models: readonly string[]): Promise<void> {
+  if (models.length === 0) return
+  const current = await load()
+  await persist({ ...current, modelCache: { ...current.modelCache, [target]: [...models] } })
 }

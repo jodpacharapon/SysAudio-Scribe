@@ -8,14 +8,14 @@ const RELEASES_PAGE = `https://github.com/${GITHUB_REPO}/releases`
 const REQUEST_TIMEOUT_MS = 10_000
 
 /** Parse "v1.2.3" or "1.2.3" into comparable numeric parts; ignores any pre-release suffix. */
-function parseVersion(raw: string): [number, number, number] {
+export function parseVersion(raw: string): [number, number, number] {
   const core = raw.replace(/^v/i, '').split('-')[0] ?? ''
   const [major, minor, patch] = core.split('.').map((n) => Number.parseInt(n, 10) || 0)
   return [major ?? 0, minor ?? 0, patch ?? 0]
 }
 
 /** True when `latest` is strictly newer than `current`. */
-function isNewer(latest: string, current: string): boolean {
+export function isNewer(latest: string, current: string): boolean {
   const a = parseVersion(latest)
   const b = parseVersion(current)
   for (let i = 0; i < 3; i += 1) {

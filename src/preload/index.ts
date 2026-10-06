@@ -4,7 +4,10 @@ import {
   IPC,
   PillMode,
   RecorderStatusUpdate,
+  ModelListResult,
+  ModelTarget,
   RemoteControlAction,
+  RewriteResult,
   SegmentRequest,
   SegmentResult,
   UpdateCheckResult
@@ -25,6 +28,21 @@ const api = {
 
   transcribeSegment: (request: SegmentRequest): Promise<SegmentResult> =>
     ipcRenderer.invoke(IPC.TRANSCRIBE_SEGMENT, request),
+
+  /** Polishes a whole transcript with Gemini. Returns a result, never throws. */
+  rewriteTranscript: (text: string): Promise<RewriteResult> =>
+    ipcRenderer.invoke(IPC.REWRITE_TRANSCRIPT, text),
+
+  /**
+   * Live model list for a provider. Returns a result, never throws.
+   * `apiKey` lets the picker use a key typed but not yet saved.
+   */
+  listModels: (target: ModelTarget, apiKey?: string): Promise<ModelListResult> =>
+    ipcRenderer.invoke(IPC.MODELS_LIST, target, apiKey),
+
+  /** The last list seen for this target. No network, so it is safe on mount. */
+  getCachedModels: (target: ModelTarget): Promise<ModelListResult> =>
+    ipcRenderer.invoke(IPC.MODELS_CACHED, target),
 
   saveTextFile: (content: string, filename: string): Promise<boolean> =>
     ipcRenderer.invoke(IPC.SAVE_TEXT_FILE, content, filename),

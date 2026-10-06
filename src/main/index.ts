@@ -2,8 +2,17 @@ import { join } from 'node:path'
 import { writeFile } from 'node:fs/promises'
 import { BrowserWindow, Menu, app, dialog, globalShortcut, ipcMain, session, shell } from 'electron'
 import { registerDisplayMediaHandler } from './audio-capture'
-import { getApiKey, getPublicSettings, hasApiKey, saveSettings } from './settings'
-import { rewriteText, transcribeSegment } from './transcription'
+import {
+  getApiKey,
+  getCachedModels,
+  getPublicSettings,
+  hasApiKey,
+  saveCachedModels,
+  saveSettings
+} from './settings'
+import { rewriteTranscript, transcribeSegment } from './transcription'
+import { nextTail } from './transcript-context'
+import { listModels } from './model-catalogue'
 import { checkForUpdate } from './update-check'
 import { destroyPill, sendPillStatus, setPillMode, showPill, hidePill, togglePill } from './pill-window'
 import {
@@ -13,6 +22,9 @@ import {
   Provider,
   RecorderStatusUpdate,
   RemoteControlAction,
+  ModelListResult,
+  ModelTarget,
+  RewriteResult,
   SegmentRequest,
   SegmentResult
 } from '../shared/types'
@@ -26,6 +38,16 @@ const PILL_HOTKEY = 'CommandOrControl+Shift+R'
 const isDev = !app.isPackaged
 
 let mainWindow: BrowserWindow | null = null
+
+/**
+ * Tail of the transcript so far, fed back to the model as the next segment's
+ * lead-in. Lives here rather than in the renderer because it must never be
+ * round-tripped through an untrusted process just to come back as a prompt.
+ *
+ * A `sequence` of 0 means a fresh recording, which is the only reset signal the
+ * main process needs — the renderer restarts its counter on every start().
+ */
+let contextTail = ''
 
 /** Bring the editor to the foreground (used when the pill starts a recording). */
 function revealMainWindow(): void {
@@ -108,23 +130,21 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.TRANSCRIBE_SEGMENT, async (_event, request: SegmentRequest): Promise<SegmentResult> => {
     const { sequence, audio, mimeType } = request
+    if (sequence === 0) contextTail = ''
     try {
       const settings = await getPublicSettings()
       const apiKey = await getApiKey(settings.provider)
       if (!apiKey) throw new Error(`No ${settings.provider} API key configured. Open Settings to add one.`)
 
-      let text = await transcribeSegment(Buffer.from(audio), mimeType, sequence, settings, apiKey)
-
-      if (settings.rewriteEnabled && text) {
-        try {
-          const geminiKey = await getApiKey('gemini')
-          if (geminiKey) {
-            text = await rewriteText(text, settings.rewriteModel, settings.rewritePrompt, geminiKey)
-          }
-        } catch (rewriteErr) {
-          console.error(`[transcription] segment ${sequence} Gemini rewrite failed, falling back to raw:`, rewriteErr)
-        }
-      }
+      const text = await transcribeSegment(
+        Buffer.from(audio),
+        mimeType,
+        sequence,
+        settings,
+        apiKey,
+        contextTail
+      )
+      if (text) contextTail = nextTail(contextTail, text)
 
       return { ok: true, sequence, text }
     } catch (error) {
@@ -134,6 +154,52 @@ function registerIpcHandlers(): void {
       console.error(`[transcription] segment ${sequence} failed:`, message)
       return { ok: false, sequence, error: message }
     }
+  })
+
+  ipcMain.handle(IPC.REWRITE_TRANSCRIPT, async (_event, text: string): Promise<RewriteResult> => {
+    try {
+      if (typeof text !== 'string' || !text.trim()) {
+        throw new Error('There is nothing to polish yet.')
+      }
+      const settings = await getPublicSettings()
+      const geminiKey = await getApiKey('gemini')
+      if (!geminiKey) throw new Error('No Gemini API key configured. Open Settings to add one.')
+
+      return { ok: true, text: await rewriteTranscript(text, settings.rewriteModel, settings.rewritePrompt, geminiKey) }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown rewrite failure'
+      console.error('[rewrite] failed:', message)
+      return { ok: false, error: message }
+    }
+  })
+
+  ipcMain.handle(IPC.MODELS_LIST, async (_event, target: ModelTarget, apiKey?: string): Promise<ModelListResult> => {
+    const cached = await getCachedModels(target)
+    try {
+      // A key typed into Settings but not yet saved still has to work, so the
+      // caller may pass one; otherwise fall back to what is stored.
+      const key = (typeof apiKey === 'string' && apiKey.trim()) || (await getApiKey(target))
+      if (!key) throw new Error(`Add a ${target} API key first, then try again.`)
+
+      const models = await listModels(target, key)
+      // Remembering the list means the next fallback is this list rather than
+      // whatever was true on the day the app was built.
+      await saveCachedModels(target, models)
+      return { models, source: 'live', error: null }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not reach the provider'
+      console.error(`[models] ${target} lookup failed:`, message)
+      return {
+        models: cached,
+        source: cached.length > 0 ? 'cache' : 'none',
+        error: message
+      }
+    }
+  })
+
+  ipcMain.handle(IPC.MODELS_CACHED, async (_event, target: ModelTarget): Promise<ModelListResult> => {
+    const cached = await getCachedModels(target)
+    return { models: cached, source: cached.length > 0 ? 'cache' : 'none', error: null }
   })
 
   ipcMain.handle(IPC.SAVE_TEXT_FILE, async (_event, content: string, filename: string): Promise<boolean> => {
