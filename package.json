@@ -5,12 +5,24 @@
   "main": "./out/main/index.js",
   "author": "SysAudio-Scribe",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jodpacharapon/SysAudio-Scribe.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jodpacharapon/SysAudio-Scribe/issues"
+  },
+  "homepage": "https://github.com/jodpacharapon/SysAudio-Scribe#readme",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && electron-vite build",
     "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "dist:win": "npm run build && electron-builder --win --publish never"
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "icons": "node scripts/generate-icons.mjs",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@blocknote/core": "^0.23.5",
@@ -24,12 +36,15 @@
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^5.2.0",
+    "@vitest/coverage-v8": "^3.2.7",
     "electron": "^43.1.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "png-to-ico": "^3.0.2",
+    "sharp": "^0.35.5",
     "typescript": "^5.7.2",
-    "vite": "^6.4.3"
+    "vite": "^6.4.3",
+    "vitest": "^3.2.7"
   },
   "build": {
     "appId": "com.sysaudioscribe.app",
