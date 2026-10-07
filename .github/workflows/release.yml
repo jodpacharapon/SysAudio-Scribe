@@ -1,0 +1,74 @@
+name: Release
+
+# Cutting a release is: bump the version, commit, push a matching tag.
+# Everything below happens on GitHub, so it does not depend on which machine
+# the tag was pushed from or on anything installed there.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Must match the platform the installer targets — electron-builder cannot
+    # produce a Windows NSIS installer from Linux without extra tooling.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # A tag that disagrees with package.json would ship an installer whose
+      # filename and in-app version do not match the release it sits under,
+      # and the update check compares against exactly that version.
+      - name: Check the tag matches package.json
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package.json version ${pkg}" >&2
+            exit 1
+          fi
+          echo "Releasing ${pkg}"
+
+      # dist:win already runs the typecheck and the build; the tests are what
+      # it does not cover, and a release is the worst place to skip them.
+      - name: Test
+        run: npm run test:coverage
+
+      - name: Build the installer
+        run: npm run dist:win
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          # An array, not a bare glob: the installer's filename contains spaces.
+          installers=(dist/*.exe)
+          if [ ${#installers[@]} -eq 0 ]; then
+            echo "No installer was produced" >&2
+            exit 1
+          fi
+
+          # Hand-written notes when they exist, generated from the commit log
+          # otherwise — a release should never go out with an empty body.
+          notes=".github/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then
+            gh release create "$GITHUB_REF_NAME" "${installers[@]}" \
+              --title "$GITHUB_REF_NAME" --notes-file "$notes"
+          else
+            gh release create "$GITHUB_REF_NAME" "${installers[@]}" \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          fi

@@ -62,6 +62,29 @@ anti-aliased edges as dozens of colour-banded paths, with the backdrop baked in
 as an opaque shape. A hand-drawn vector of a few paths is worth far more than a
 traced one of several hundred.
 
+## Cutting a release
+
+```bash
+npm version 0.3.0 --no-git-tag-version
+git commit -am "chore: bump to 0.3.0"
+git tag v0.3.0
+git push origin main --tags
+```
+
+Pushing the tag is the whole release. `.github/workflows/release.yml` runs the
+tests, builds the Windows installer on a GitHub runner, and publishes the
+release with the installer attached. It uses the token Actions provides, so no
+credentials live on anyone's machine and any maintainer can cut a release from
+any machine.
+
+The tag must match `package.json`, or the job fails before building — a
+mismatch would ship an installer whose in-app version disagrees with the
+release it sits under, and the update check compares against exactly that.
+
+Write the notes in `.github/release-notes/v<version>.md` and they will be used
+as the release body. Without that file the body is generated from the commit
+log, which is a fallback rather than a goal.
+
 ## Conventions
 
 - Conventional commit messages: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`,
