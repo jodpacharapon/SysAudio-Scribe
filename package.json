@@ -1,6 +1,6 @@
 {
   "name": "sysaudio-scribe",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Notion-style note taking with system audio transcription",
   "main": "./out/main/index.js",
   "author": "SysAudio-Scribe",
