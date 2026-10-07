@@ -1,10 +1,30 @@
+<div align="center">
+
+<img src="docs/logo.png" alt="" width="104" height="104">
+
 # SysAudio-Scribe
 
-Notion-style editor that captures **system audio** (what your speakers play) — and optionally your **microphone** — and turns it into text blocks via a cloud speech-to-text API (OpenAI or OpenRouter), with optional AI clean-up via Google Gemini.
+**Transcribe what your computer is playing, straight into a Notion-style editor.**
+
+[![CI](https://github.com/jodpacharapon/SysAudio-Scribe/actions/workflows/ci.yml/badge.svg)](https://github.com/jodpacharapon/SysAudio-Scribe/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/jodpacharapon/SysAudio-Scribe?include_prereleases&sort=semver)](https://github.com/jodpacharapon/SysAudio-Scribe/releases)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+</div>
+
+Captures **system audio** — the sound coming out of your speakers, not your microphone — and turns it into text blocks as you listen. Meeting calls, videos, anything playing. Your mic can be mixed in too, but it is off by default.
+
+Speech-to-text runs through OpenAI or OpenRouter; an optional clean-up pass runs through Google Gemini. Windows only for now: loopback capture needs WASAPI.
 
 > **Please read [Privacy](#privacy) before recording.** This app records audio and sends it to third-party APIs.
 
-## Quick start
+## Download
+
+Grab the installer from [Releases](https://github.com/jodpacharapon/SysAudio-Scribe/releases). It installs per-user and needs no admin rights.
+
+The build is unsigned, so Windows SmartScreen will warn the first time: choose **More info -> Run anyway**. If you would rather not, [build it yourself](#build) — the result is the same binary.
+
+## Running from source
 
 ```bash
 npm install
